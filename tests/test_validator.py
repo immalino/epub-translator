@@ -46,3 +46,4 @@ def test_validator_corrupted_xml(tmp_path: Path):
 
     assert not report.is_valid
     assert any("Sintaks XML tidak valid" in e for e in report.errors)
+

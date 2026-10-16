@@ -122,3 +122,4 @@ def test_chapter_selective_translation(tmp_path: Path, monkeypatch):
 
     assert "Terjemahan" in c1
     assert "Midnight arrived" in c2  # Original English
+

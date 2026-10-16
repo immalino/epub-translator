@@ -222,3 +222,4 @@ Hasil pengujian mencakup:
   - **A**: Tidak masalah! Aplikasi menyertakan Built-in EPUB Validator yang memverifikasi kepatuhan ZIP, spesifikasi `mimetype`, dan well-formedness dokumen XML/XHTML. Jika Anda memasang Calibre (`sudo apt install calibre`), aplikasi akan otomatis memanfaatkan `ebook-validate` untuk validasi tambahan.
 - **Q: Apakah file EPUB asli saya aman?**
   - **A**: Ya, 100% aman. EPUB sumber hanya dibaca dalam mode *read-only*. Hasil terjemahan selalu disimpan pada file baru yang ditentukan melalui opsi `-o`.
+

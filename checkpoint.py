@@ -239,3 +239,4 @@ class CheckpointManager:
             "completed_batches": completed_batches,
             "failed_batches": failed_batches,
         }
+

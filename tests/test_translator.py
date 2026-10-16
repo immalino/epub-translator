@@ -99,3 +99,4 @@ def test_translate_batch_fallback_on_429(mock_segments):
     # Verify keyA is now on cooldown
     rec_a = next(r for r in km.records if r.key == "keyA")
     assert not rec_a.is_available
+

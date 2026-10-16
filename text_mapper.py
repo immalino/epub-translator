@@ -220,3 +220,4 @@ class XHTMLTextMapper:
             pretty_print=False,
         )
         return output_bytes
+

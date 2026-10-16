@@ -122,3 +122,4 @@ class Config:
         if not self.api_keys:
             return "No API keys configured"
         return f"{len(self.api_keys)} key(s): " + ", ".join(mask_key(k) for k in self.api_keys)
+

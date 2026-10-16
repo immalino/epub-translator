@@ -207,3 +207,4 @@ if __name__ == "__main__":
     out = Path("tests/fixtures/sample_novel.epub")
     create_fixture_epub(out)
     print(f"Generated fixture EPUB at {out.resolve()} (size: {out.stat().st_size} bytes)")
+

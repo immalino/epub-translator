@@ -47,3 +47,4 @@ def test_key_manager_fallback_on_rate_limit():
     summary = km.get_status_summary()
     assert "cooldown" in summary
     assert "ready" in summary
+

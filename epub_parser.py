@@ -309,3 +309,4 @@ class EPUBBuilder:
             if temp_out.exists():
                 temp_out.unlink(missing_ok=True)
             raise e
+

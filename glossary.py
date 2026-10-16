@@ -93,3 +93,4 @@ class Glossary:
 
     def __repr__(self) -> str:
         return f"Glossary(terms={len(self.terms)}, hash={self.hash})"
+

@@ -72,3 +72,4 @@ def test_text_mapper_broken_tag_recovery():
     out_bytes = mapper.apply_translations(tree, segments, translations)
     re_parsed = etree.fromstring(out_bytes)
     assert re_parsed is not None
+

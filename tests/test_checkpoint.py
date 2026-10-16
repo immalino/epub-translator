@@ -60,3 +60,4 @@ def test_checkpoint_failure_and_retry(tmp_path: Path):
     assert summary["failed_chapters"] == 1
     assert summary["failed_batches"] == 1
     assert not cp.is_batch_completed("OEBPS/ch2.xhtml", "b001", "src_hash")
+

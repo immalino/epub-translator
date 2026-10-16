@@ -40,3 +40,4 @@ def test_glossary_list_format(tmp_path: Path):
     assert len(g) == 2
     assert g.terms["London"] == "London"
     assert g.terms["train"] == "kereta"
+

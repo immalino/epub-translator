@@ -197,3 +197,4 @@ class EPUBValidator:
             warnings=warnings,
             checks_passed=passed,
         )
+

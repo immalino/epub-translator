@@ -76,3 +76,4 @@ def test_epub_builder_mimetype_and_language(tmp_path: Path):
     out_book = EPUBParser(out_epub).parse()
     assert out_book.language == "id"
     assert out_book.title == "Kronik Finch"
+
