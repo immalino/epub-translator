@@ -243,6 +243,31 @@ TUGAS DAN PRINSIP UTAMA:
                 from google.genai import types
 
                 client = genai.Client(api_key=active_key)
+
+                # Permissive safety settings for literary novel content
+                safety_settings = [
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                ]
+
                 response = client.models.generate_content(
                     model=self.config.model,
                     contents=user_prompt,
@@ -251,23 +276,57 @@ TUGAS DAN PRINSIP UTAMA:
                         temperature=0.3,
                         response_mime_type="application/json",
                         response_schema=TranslationBatchResponse,
+                        safety_settings=safety_settings,
                     ),
                 )
 
-                # Parse and validate response
-                result_text = response.text
-                if not result_text:
-                    raise ValueError("Empty response received from Gemini API")
-
-                parsed_json = json.loads(result_text)
-                translations_list = parsed_json.get("translations", [])
-
                 result_map: Dict[str, str] = {}
-                for item in translations_list:
-                    seg_id = str(item.get("id", ""))
-                    text_val = str(item.get("text", "")).strip()
-                    if seg_id in expected_ids and text_val:
-                        result_map[seg_id] = text_val
+
+                # 1. Try parsed response directly from SDK
+                if hasattr(response, "parsed") and response.parsed:
+                    translations_list = getattr(response.parsed, "translations", [])
+                    for item in translations_list:
+                        seg_id = str(getattr(item, "id", ""))
+                        text_val = str(getattr(item, "text", "")).strip()
+                        if seg_id in expected_ids and text_val:
+                            result_map[seg_id] = text_val
+
+                # 2. Fallback to response.text if parsed is empty
+                if len(result_map) < len(expected_ids):
+                    result_text = response.text
+
+                    # 3. If response.text is empty, inspect candidate parts
+                    if not result_text and response.candidates:
+                        c0 = response.candidates[0]
+                        if c0.content and c0.content.parts:
+                            parts_text = [
+                                p.text for p in c0.content.parts
+                                if getattr(p, "text", None)
+                            ]
+                            if parts_text:
+                                result_text = "".join(parts_text)
+
+                    if not result_text:
+                        c_info = ""
+                        if response.candidates:
+                            c0 = response.candidates[0]
+                            c_info = f" (finish_reason={c0.finish_reason}, safety={getattr(c0, 'safety_ratings', None)})"
+                        raise ValueError(f"Empty response received from Gemini API{c_info}")
+
+                    # Strip code fences if present
+                    clean_text = result_text.strip()
+                    if clean_text.startswith("```"):
+                        import re
+                        clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text)
+                        clean_text = re.sub(r"\s*```$", "", clean_text)
+
+                    parsed_json = json.loads(clean_text)
+                    raw_list = parsed_json.get("translations", [])
+                    for item in raw_list:
+                        seg_id = str(item.get("id", ""))
+                        text_val = str(item.get("text", "")).strip()
+                        if seg_id in expected_ids and text_val:
+                            result_map[seg_id] = text_val
 
                 # Validation: check all IDs were received
                 missing_ids = expected_ids - set(result_map.keys())
@@ -285,6 +344,8 @@ TUGAS DAN PRINSIP UTAMA:
                     or "quota" in err_str
                     or "resource_exhausted" in err_str
                     or "rate limit" in err_str
+                    or "503" in err_str
+                    or "unavailable" in err_str
                 )
 
                 if is_rate_limit:
