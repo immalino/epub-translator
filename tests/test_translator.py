@@ -36,7 +36,7 @@ def test_dry_run_stats(mock_segments):
     assert stats["total_segments"] == 2
     assert stats["total_words"] == 7
     assert stats["total_batches"] == 1
-    assert stats["model"] == "gemini-2.5-flash"
+    assert stats["model"] == "gemini-3.5-flash"
 
 
 def test_translate_batch_success(mock_segments):

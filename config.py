@@ -67,7 +67,7 @@ class Config:
     """Runtime configuration for EPUB translation."""
 
     api_keys: List[str] = field(default_factory=list)
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.5-flash"
     batch_size: int = 20
     max_batch_chars: int = 3500
     source_lang: str = "en"
