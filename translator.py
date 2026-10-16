@@ -45,10 +45,12 @@ class KeyRecord:
     cooldown_until: float = 0.0
     failed_attempts: int = 0
     success_count: int = 0
+    is_disabled: bool = False
+    disable_reason: Optional[str] = None
 
     @property
     def is_available(self) -> bool:
-        return time.time() >= self.cooldown_until
+        return not self.is_disabled and time.time() >= self.cooldown_until
 
 
 class KeyManager:
@@ -69,14 +71,15 @@ class KeyManager:
         self._current_idx: int = 0
 
     def has_keys(self) -> bool:
-        return len(self.records) > 0
+        return any(not r.is_disabled for r in self.records)
 
     def get_active_key(self) -> str:
         """Return the next available healthy key, waiting if all are on cooldown."""
-        if not self.records:
+        active_records = [r for r in self.records if not r.is_disabled]
+        if not active_records:
             raise ValueError(
-                "Tidak ada Gemini API Key yang dikonfigurasi! "
-                "Set environment variable GEMINI_API_KEY / GEMINI_API_KEYS atau gunakan opsi --api-keys."
+                "Semua API Key Gemini tidak dapat digunakan (dinonaktifkan / 403 Permission Denied)! "
+                "Periksa kunci API Anda di .env atau Google AI Studio."
             )
 
         n = len(self.records)
@@ -93,17 +96,30 @@ class KeyManager:
                     self._current_idx = idx
                 return rec.key
 
-        # If all keys are in cooldown, find the one that expires earliest
-        earliest_rec = min(self.records, key=lambda r: r.cooldown_until)
+        # If all non-disabled keys are in cooldown, find the one that expires earliest
+        earliest_rec = min(active_records, key=lambda r: r.cooldown_until)
         wait_seconds = max(0.5, earliest_rec.cooldown_until - now)
         logger.warning(
-            "Semua %d API key sedang cooldown/rate limited. Menunggu %.1f detik sampai key %s aktif kembali...",
-            n,
+            "Semua %d API key aktif sedang cooldown/rate limited. Menunggu %.1f detik sampai key %s aktif kembali...",
+            len(active_records),
             wait_seconds,
             mask_key(earliest_rec.key),
         )
         time.sleep(wait_seconds + 0.5)
         return earliest_rec.key
+
+    def mark_disabled(self, key: str, reason: str = "") -> None:
+        """Permanently disable a key that returned 403 or invalid auth."""
+        for rec in self.records:
+            if rec.key == key:
+                rec.is_disabled = True
+                rec.disable_reason = reason
+                logger.error(
+                    "API Key %s dinonaktifkan (%s). Tidak akan digunakan lagi dalam sesi ini.",
+                    mask_key(key),
+                    reason,
+                )
+                break
 
     def mark_rate_limited(self, key: str, cooldown_seconds: Optional[float] = None) -> None:
         """Mark an API key as rate-limited (HTTP 429) to trigger fallback."""
@@ -339,6 +355,12 @@ TUGAS DAN PRINSIP UTAMA:
 
             except Exception as e:
                 err_str = str(e).lower()
+                is_perm_error = (
+                    "403" in err_str
+                    or "permission_denied" in err_str
+                    or "denied access" in err_str
+                    or "api_key_invalid" in err_str
+                )
                 is_rate_limit = (
                     "429" in err_str
                     or "quota" in err_str
@@ -348,7 +370,10 @@ TUGAS DAN PRINSIP UTAMA:
                     or "unavailable" in err_str
                 )
 
-                if is_rate_limit:
+                if is_perm_error:
+                    logger.error("Key %s ditolak aksesnya (403): %s", mask_key(active_key), e)
+                    self.key_manager.mark_disabled(active_key, "403 PERMISSION_DENIED / Project Denied Access")
+                elif is_rate_limit:
                     logger.warning("Key %s terkena rate limit: %s", mask_key(active_key), e)
                     self.key_manager.mark_rate_limited(active_key)
                 else:
