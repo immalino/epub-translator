@@ -505,11 +505,11 @@ def translate_single_epub(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Terjemahkan buku EPUB Inggris ke Indonesia menggunakan Ollama lokal (translategemma:4b) atau Gemini API."
+        description="Terjemahkan buku EPUB Inggris ke Indonesia menggunakan Gemini API atau Ollama lokal."
     )
     parser.add_argument("input_epub", nargs="?", default=None, help="Path ke file EPUB sumber atau direktori (opsional, default: pindai folder input/).")
     parser.add_argument("-o", "--output", help="Path untuk menyimpan file EPUB hasil terjemahan (opsional, default: folder output/ dengan nama sama).")
-    parser.add_argument("--provider", choices=["ollama", "gemini"], default=None, help="Provider translasi: 'ollama' (default) atau 'gemini'.")
+    parser.add_argument("--provider", choices=["gemini", "ollama"], default=None, help="Provider translasi: 'gemini' (default) atau 'ollama'.")
     parser.add_argument("--ollama-url", default=None, help="URL endpoint Ollama (default: http://localhost:11434).")
     parser.add_argument("--input-dir", default=None, help="Folder berkas EPUB sumber (default: 'input').")
     parser.add_argument("--output-dir", default=None, help="Folder penyimpanan EPUB hasil terjemahan (default: 'output').")

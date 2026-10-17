@@ -66,17 +66,17 @@ def parse_api_keys(
 class Config:
     """Runtime configuration for EPUB translation."""
 
-    provider: str = "ollama"  # 'ollama' or 'gemini'
-    ollama_base_url: str = "http://localhost:11434"
-    model: str = "translategemma:4b"
-    batch_size: int = 5
+    provider: str = "gemini"  # 'gemini' or 'ollama'
+    model: str = "gemini-2.5-flash"
+    batch_size: int = 20
     max_batch_chars: int = 3500
     source_lang: str = "en"
     target_lang: str = "id"
     style: str = "natural"
-    request_timeout: float = 120.0
+    request_timeout: float = 60.0
     input_dir: Path = field(default_factory=lambda: Path("input"))
     output_dir: Path = field(default_factory=lambda: Path("output"))
+    ollama_base_url: str = "http://localhost:11434"
     api_keys: List[str] = field(default_factory=list)
     max_retries: int = 5
     max_retries_per_key: int = 3
@@ -98,16 +98,12 @@ class Config:
         keys = parse_api_keys(
             cli_keys=overrides.get("api_keys"),
         )
-        provider = overrides.get("provider")
-        if not provider:
-            if overrides.get("api_keys"):
-                provider = "gemini"
-            else:
-                provider = (
-                    os.getenv("TRANSLATION_PROVIDER")
-                    or os.getenv("PROVIDER")
-                    or "ollama"
-                )
+        provider = (
+            overrides.get("provider")
+            or os.getenv("TRANSLATION_PROVIDER")
+            or os.getenv("PROVIDER")
+            or "gemini"
+        )
 
         ollama_base_url = (
             overrides.get("ollama_base_url")
