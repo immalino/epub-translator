@@ -216,6 +216,19 @@ class CheckpointManager:
             self.chapters[href].error_message = None
             self.save()
 
+    def is_chapter_completed(self, href: str) -> bool:
+        """Check if chapter is marked completed."""
+        ch = self.chapters.get(href)
+        return ch is not None and ch.status == "COMPLETED"
+
+    def has_completed_batches(self) -> bool:
+        """Check if any batch has been completed in this checkpoint."""
+        return any(
+            b.status == "COMPLETED"
+            for ch in self.chapters.values()
+            for b in ch.batches.values()
+        )
+
     def get_summary(self) -> Dict[str, Any]:
         """Return statistics on progress."""
         total_ch = len(self.chapters)

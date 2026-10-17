@@ -35,3 +35,10 @@ ENV/
 # Environment variables
 .env
 
+# Ebook files & directories
+*.epub
+!input/.gitkeep
+!output/.gitkeep
+*:Zone.Identifier
+
+

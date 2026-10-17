@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import re
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,6 +24,204 @@ from glossary import Glossary
 from text_mapper import TranslatableSegment
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GeminiQuotaDetails:
+    """Structured representation of quota limit details extracted from Gemini API errors."""
+
+    is_quota_error: bool = False
+    limit_type: str = "UNKNOWN"  # "RPM", "TPM", "RPD", "ZERO_LIMIT", "UNKNOWN"
+    quota_id: Optional[str] = None
+    quota_metric: Optional[str] = None
+    model: Optional[str] = None
+    limit_value: Optional[str] = None
+    retry_delay: Optional[float] = None
+    reason: Optional[str] = None
+    message: str = ""
+
+    @property
+    def is_daily_or_zero(self) -> bool:
+        """True if the limit is a non-transient limit (daily RPD or limit: 0)."""
+        return self.limit_type in ("RPD", "ZERO_LIMIT")
+
+
+class GeminiDailyQuotaExhaustedError(Exception):
+    """Raised when Gemini API daily quota (RPD) or zero quota (limit: 0) is encountered.
+
+    Automatic retries must stop immediately when this occurs across all available keys.
+    """
+
+    def __init__(self, message: str, quota_details: Optional[GeminiQuotaDetails] = None) -> None:
+        super().__init__(message)
+        self.quota_details = quota_details
+
+
+def extract_gemini_quota_details(
+    error: Exception, default_model: Optional[str] = None
+) -> GeminiQuotaDetails:
+    """Extract quota failure details (quotaId, quotaMetric, model, retryDelay, limit_type).
+
+    Parses both structured Google GenAI SDK ClientError / APIError payloads and
+    textual representations.
+    """
+    err_str = str(error)
+    code = getattr(error, "code", None)
+    status = getattr(error, "status", None)
+
+    is_429 = code == 429 or "429" in err_str
+    is_resource_exhausted = (
+        status == "RESOURCE_EXHAUSTED"
+        or "resource_exhausted" in err_str.lower()
+        or "quota" in err_str.lower()
+        or "rate limit" in err_str.lower()
+    )
+
+    if not (is_429 or is_resource_exhausted):
+        return GeminiQuotaDetails(is_quota_error=False, message=err_str)
+
+    quota_id: Optional[str] = None
+    quota_metric: Optional[str] = None
+    model: Optional[str] = None
+    limit_value: Optional[str] = None
+    retry_delay: Optional[float] = None
+    reason: Optional[str] = None
+
+    # 1. Parse structured details if present on the exception object
+    raw_details = getattr(error, "details", None)
+    details_list: List[Dict[str, Any]] = []
+
+    if isinstance(raw_details, dict):
+        details_list = raw_details.get("error", {}).get("details", []) or raw_details.get("details", [])
+    elif isinstance(raw_details, list):
+        details_list = raw_details
+
+    # If details_list is empty, try to extract json from err_str
+    if not details_list:
+        try:
+            json_start = err_str.find("{")
+            json_end = err_str.rfind("}")
+            if json_start != -1 and json_end != -1 and json_end > json_start:
+                cand = json.loads(err_str[json_start : json_end + 1])
+                if isinstance(cand, dict):
+                    details_list = cand.get("error", {}).get("details", []) or cand.get("details", [])
+        except Exception:
+            pass
+
+    for item in details_list:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("@type", ""))
+
+        if "ErrorInfo" in item_type or "reason" in item:
+            reason = item.get("reason", reason)
+            meta = item.get("metadata", {})
+            if isinstance(meta, dict):
+                quota_id = meta.get("quotaId") or quota_id
+                quota_metric = meta.get("quotaMetric") or quota_metric
+                model = meta.get("model") or model
+                limit_value = meta.get("quotaLimit") or meta.get("quotaLimitValue") or limit_value
+
+        if "RetryInfo" in item_type or "retryDelay" in item:
+            raw_delay = item.get("retryDelay")
+            if isinstance(raw_delay, (int, float)):
+                retry_delay = float(raw_delay)
+            elif isinstance(raw_delay, str):
+                m = re.search(r"(\d+(?:\.\d+)?)", raw_delay)
+                if m:
+                    retry_delay = float(m.group(1))
+
+        if "QuotaFailure" in item_type or "violations" in item:
+            violations = item.get("violations", [])
+            for v in violations:
+                if isinstance(v, dict):
+                    desc = v.get("description", "")
+                    if not quota_metric:
+                        m = re.search(r"quota metric ['\"]([^'\"]+)['\"]", desc)
+                        if m:
+                            quota_metric = m.group(1)
+                    if not limit_value:
+                        m = re.search(r"limit ['\"]?(\d+)['\"]?", desc)
+                        if m:
+                            limit_value = m.group(1)
+
+    # 2. Check HTTP headers (Retry-After) if available
+    response_obj = getattr(error, "response", None)
+    if response_obj and hasattr(response_obj, "headers") and retry_delay is None:
+        hdr = response_obj.headers.get("retry-after") or response_obj.headers.get("Retry-After")
+        if hdr:
+            try:
+                retry_delay = float(hdr)
+            except ValueError:
+                pass
+
+    # 3. Text fallback with regex
+    if not quota_id:
+        m = re.search(r"quotaId['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", err_str, re.IGNORECASE)
+        if m:
+            quota_id = m.group(1)
+
+    if not quota_metric:
+        m = re.search(r"quotaMetric['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", err_str, re.IGNORECASE)
+        if m:
+            quota_metric = m.group(1)
+
+    if not limit_value:
+        m = re.search(r"(?:limit|quotaLimit)['\"]?\s*[:=]?\s*['\"]?(\d+)['\"]?", err_str, re.IGNORECASE)
+        if m:
+            limit_value = m.group(1)
+
+    if not model:
+        m = re.search(r"models/([a-zA-Z0-9\.\-]+)", err_str, re.IGNORECASE)
+        if m:
+            model = m.group(1)
+        else:
+            m = re.search(r"\b(gemini-[a-zA-Z0-9\.\-]+)\b", err_str, re.IGNORECASE)
+            if m:
+                model = m.group(1)
+            else:
+                model = default_model
+
+    if retry_delay is None:
+        m = re.search(r"retry(?:delay)?\s*(?:after|in)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*s\b", err_str, re.IGNORECASE)
+        if m:
+            retry_delay = float(m.group(1))
+        else:
+            m = re.search(r"retry\s+after\s+(\d+(?:\.\d+)?)\s+seconds?", err_str, re.IGNORECASE)
+            if m:
+                retry_delay = float(m.group(1))
+
+    # 4. Classify limit_type: ZERO_LIMIT, RPD, TPM, RPM, UNKNOWN
+    combined_text = f"{err_str} {quota_id or ''} {quota_metric or ''}".lower()
+
+    if limit_value == "0" or re.search(r"\blimit\s*[:=]?\s*['\"]?0['\"]?\b", combined_text):
+        limit_type = "ZERO_LIMIT"
+    elif any(k in combined_text for k in ["perday", "requestsperday", "per_day", "rpd", "daily", "per day"]):
+        limit_type = "RPD"
+    elif any(k in combined_text for k in ["tokensperminute", "input_tokens", "output_tokens", "tpm", "tokens per minute"]) or (
+        "token" in combined_text and "minute" in combined_text
+    ):
+        limit_type = "TPM"
+    elif any(k in combined_text for k in ["perminute", "requestsperminute", "per_minute", "rpm", "requests per minute"]) or (
+        "request" in combined_text and "minute" in combined_text
+    ):
+        limit_type = "RPM"
+    elif retry_delay is not None and retry_delay <= 120:
+        limit_type = "RPM"
+    else:
+        limit_type = "UNKNOWN"
+
+    return GeminiQuotaDetails(
+        is_quota_error=True,
+        limit_type=limit_type,
+        quota_id=quota_id,
+        quota_metric=quota_metric,
+        model=model,
+        limit_value=limit_value,
+        retry_delay=retry_delay,
+        reason=reason,
+        message=getattr(error, "message", None) or err_str,
+    )
 
 
 class SegmentTranslation(BaseModel):
@@ -46,11 +248,16 @@ class KeyRecord:
     failed_attempts: int = 0
     success_count: int = 0
     is_disabled: bool = False
+    daily_exhausted: bool = False
     disable_reason: Optional[str] = None
 
     @property
     def is_available(self) -> bool:
-        return not self.is_disabled and time.time() >= self.cooldown_until
+        return (
+            not self.is_disabled
+            and not self.daily_exhausted
+            and time.time() >= self.cooldown_until
+        )
 
 
 class KeyManager:
@@ -73,10 +280,20 @@ class KeyManager:
     def has_keys(self) -> bool:
         return any(not r.is_disabled for r in self.records)
 
-    def get_active_key(self) -> str:
-        """Return the next available healthy key, waiting if all are on cooldown."""
-        active_records = [r for r in self.records if not r.is_disabled]
+    def has_available_keys_today(self) -> bool:
+        """Check if any keys are not permanently disabled and not daily exhausted."""
+        return any(not r.is_disabled and not r.daily_exhausted for r in self.records)
+
+    def get_active_key(self, max_wait: float = 300.0) -> str:
+        """Return the next available healthy key, waiting if all are on temporary cooldown."""
+        active_records = [r for r in self.records if not r.is_disabled and not r.daily_exhausted]
         if not active_records:
+            daily_count = sum(1 for r in self.records if r.daily_exhausted)
+            if daily_count > 0:
+                raise GeminiDailyQuotaExhaustedError(
+                    f"Semua ({len(self.records)}) API Key Gemini telah mencapai batas kuota harian (RPD) "
+                    "atau limit 0. Translasi tidak dapat dilanjutkan hari ini."
+                )
             raise ValueError(
                 "Semua API Key Gemini tidak dapat digunakan (dinonaktifkan / 403 Permission Denied)! "
                 "Periksa kunci API Anda di .env atau Google AI Studio."
@@ -89,23 +306,29 @@ class KeyManager:
         for i in range(n):
             idx = (self._current_idx + i) % n
             rec = self.records[idx]
-            if rec.is_available:
+            if not rec.is_disabled and not rec.daily_exhausted and rec.is_available:
                 if self.strategy == "round_robin":
                     self._current_idx = (idx + 1) % n
                 else:
                     self._current_idx = idx
                 return rec.key
 
-        # If all non-disabled keys are in cooldown, find the one that expires earliest
+        # If all non-disabled keys are in temporary cooldown, find the one that expires earliest
         earliest_rec = min(active_records, key=lambda r: r.cooldown_until)
-        wait_seconds = max(0.5, earliest_rec.cooldown_until - now)
+        wait_seconds = max(0.1, earliest_rec.cooldown_until - now)
+        if wait_seconds > max_wait:
+            raise TimeoutError(
+                f"Waktu tunggu cooldown kunci ({wait_seconds:.1f}s) melebihi batas maksimum ({max_wait}s)."
+            )
+
         logger.warning(
-            "Semua %d API key aktif sedang cooldown/rate limited. Menunggu %.1f detik sampai key %s aktif kembali...",
+            "Semua %d API key aktif sedang cooldown/rate limited (RPM/TPM). "
+            "Menunggu %.1f detik sampai key %s aktif kembali...",
             len(active_records),
             wait_seconds,
             mask_key(earliest_rec.key),
         )
-        time.sleep(wait_seconds + 0.5)
+        time.sleep(wait_seconds + 0.2)
         return earliest_rec.key
 
     def mark_disabled(self, key: str, reason: str = "") -> None:
@@ -121,16 +344,39 @@ class KeyManager:
                 )
                 break
 
-    def mark_rate_limited(self, key: str, cooldown_seconds: Optional[float] = None) -> None:
-        """Mark an API key as rate-limited (HTTP 429) to trigger fallback."""
-        cd = cooldown_seconds or self.default_cooldown
+    def mark_daily_exhausted(
+        self, key: str, quota_details: Optional[GeminiQuotaDetails] = None
+    ) -> None:
+        """Mark an API key as exhausted for the day (RPD or limit: 0)."""
+        for rec in self.records:
+            if rec.key == key:
+                rec.daily_exhausted = True
+                type_str = quota_details.limit_type if quota_details else "RPD"
+                rec.disable_reason = f"Quota Exhausted: {type_str}"
+                logger.error(
+                    "API Key %s mencapai limit harian/kuota nol (%s). Dinonaktifkan untuk sesi ini.",
+                    mask_key(key),
+                    type_str,
+                )
+                break
+
+    def mark_rate_limited(
+        self,
+        key: str,
+        cooldown_seconds: Optional[float] = None,
+        quota_details: Optional[GeminiQuotaDetails] = None,
+    ) -> None:
+        """Mark an API key as temporarily rate-limited (RPM/TPM) to trigger backoff/fallback."""
+        cd = cooldown_seconds if cooldown_seconds is not None else self.default_cooldown
         for rec in self.records:
             if rec.key == key:
                 rec.cooldown_until = time.time() + cd
                 rec.failed_attempts += 1
+                limit_info = f" ({quota_details.limit_type})" if quota_details else ""
                 logger.warning(
-                    "API Key %s mencapai limit kuota (429). Cooldown selama %.0f detik. Beralih ke fallback key.",
+                    "API Key %s terkena rate limit%s (429). Cooldown %.1f detik.",
                     mask_key(key),
+                    limit_info,
                     cd,
                 )
                 break
@@ -151,10 +397,14 @@ class KeyManager:
         now = time.time()
         for rec in self.records:
             masked = mask_key(rec.key)
-            if rec.is_available:
+            if rec.daily_exhausted:
+                items.append(f"{masked}(daily_exhausted)")
+            elif rec.is_disabled:
+                items.append(f"{masked}(disabled)")
+            elif rec.is_available:
                 items.append(f"{masked}(ready, ok:{rec.success_count})")
             else:
-                remaining = int(rec.cooldown_until - now)
+                remaining = max(0, int(rec.cooldown_until - now))
                 items.append(f"{masked}(cooldown:{remaining}s)")
         return ", ".join(items)
 
@@ -245,11 +495,11 @@ TUGAS DAN PRINSIP UTAMA:
         system_instruction = self.build_system_instruction()
 
         # Retry loop across available keys and attempts
-        max_total_attempts = max(3, len(self.config.api_keys) * 2)
+        max_attempts = getattr(self.config, "max_retries", 5)
         attempt = 0
         last_error: Optional[Exception] = None
 
-        while attempt < max_total_attempts:
+        while attempt < max_attempts:
             attempt += 1
             active_key = self.key_manager.get_active_key()
 
@@ -258,7 +508,11 @@ TUGAS DAN PRINSIP UTAMA:
                 from google import genai
                 from google.genai import types
 
-                client = genai.Client(api_key=active_key)
+                timeout_ms = int(self.config.request_timeout * 1000)
+                client = genai.Client(
+                    api_key=active_key,
+                    http_options=types.HttpOptions(timeout=timeout_ms),
+                )
 
                 # Permissive safety settings for literary novel content
                 safety_settings = [
@@ -332,7 +586,6 @@ TUGAS DAN PRINSIP UTAMA:
                     # Strip code fences if present
                     clean_text = result_text.strip()
                     if clean_text.startswith("```"):
-                        import re
                         clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text)
                         clean_text = re.sub(r"\s*```$", "", clean_text)
 
@@ -354,6 +607,7 @@ TUGAS DAN PRINSIP UTAMA:
                 return result_map
 
             except Exception as e:
+                last_error = e
                 err_str = str(e).lower()
                 is_perm_error = (
                     "403" in err_str
@@ -361,30 +615,98 @@ TUGAS DAN PRINSIP UTAMA:
                     or "denied access" in err_str
                     or "api_key_invalid" in err_str
                 )
-                is_rate_limit = (
-                    "429" in err_str
-                    or "quota" in err_str
-                    or "resource_exhausted" in err_str
-                    or "rate limit" in err_str
-                    or "503" in err_str
-                    or "unavailable" in err_str
-                )
 
                 if is_perm_error:
                     logger.error("Key %s ditolak aksesnya (403): %s", mask_key(active_key), e)
-                    self.key_manager.mark_disabled(active_key, "403 PERMISSION_DENIED / Project Denied Access")
-                elif is_rate_limit:
-                    logger.warning("Key %s terkena rate limit: %s", mask_key(active_key), e)
-                    self.key_manager.mark_rate_limited(active_key)
-                else:
-                    logger.warning("Percobaan %d gagal dengan key %s: %s", attempt, mask_key(active_key), e)
-                    # Brief backoff for transient network issues
-                    time.sleep(min(2.0 * attempt, 10.0))
+                    self.key_manager.mark_disabled(active_key, "403 PERMISSION_DENIED")
+                    continue
 
-                last_error = e
+                # Check if this is a Gemini Quota / 429 error
+                quota_details = extract_gemini_quota_details(e, default_model=self.config.model)
+
+                if quota_details.is_quota_error:
+                    logger.warning(
+                        "Quota/Rate Limit terdeteksi pada key %s [Jenis: %s, Model: %s, QuotaId: %s, Metric: %s, RetryDelay: %s]",
+                        mask_key(active_key),
+                        quota_details.limit_type,
+                        quota_details.model,
+                        quota_details.quota_id,
+                        quota_details.quota_metric,
+                        f"{quota_details.retry_delay}s" if quota_details.retry_delay is not None else "None",
+                    )
+
+                    # RPD or ZERO_LIMIT: STOP endless retries!
+                    if quota_details.is_daily_or_zero:
+                        self.key_manager.mark_daily_exhausted(active_key, quota_details)
+                        if not self.key_manager.has_available_keys_today():
+                            raise GeminiDailyQuotaExhaustedError(
+                                f"Batas kuota harian ({quota_details.limit_type}) atau kuota 0 tercapai pada model {quota_details.model}. "
+                                f"Quota ID: {quota_details.quota_id or '-'}, Metric: {quota_details.quota_metric or '-'}. "
+                                "Retry otomatis dihentikan agar tidak melebihi batas kuota. Simpan progres dan lanjutkan nanti.",
+                                quota_details=quota_details,
+                            )
+                        # Other keys might still be available
+                        continue
+
+                    # Per-minute limits (RPM / TPM): exponential backoff with jitter and respect retryDelay
+                    jitter = random.uniform(1.0, 3.0)
+                    if quota_details.retry_delay is not None and quota_details.retry_delay > 0:
+                        backoff = quota_details.retry_delay + jitter
+                        logger.warning(
+                            "Menghormati retryDelay dari Gemini API: %.1fs (+ jitter %.1fs = %.1fs)",
+                            quota_details.retry_delay,
+                            jitter,
+                            backoff,
+                        )
+                    else:
+                        # Exponential backoff with jitter
+                        base_backoff = min(60.0, 5.0 * (2 ** (attempt - 1)))
+                        backoff = base_backoff + random.uniform(0.5, 2.5)
+                        logger.warning(
+                            "Exponential backoff dengan jitter untuk %s: %.1fs (attempt %d/%d)",
+                            quota_details.limit_type,
+                            backoff,
+                            attempt,
+                            max_attempts,
+                        )
+
+                    self.key_manager.mark_rate_limited(
+                        active_key, cooldown_seconds=backoff, quota_details=quota_details
+                    )
+                    continue
+
+                # Network error or transient exception
+                is_network = (
+                    isinstance(e, (ConnectionError, TimeoutError, OSError))
+                    or any(
+                        w in err_str
+                        for w in ["connect", "timeout", "timed out", "connection reset", "network", "remote protocol error"]
+                    )
+                )
+                net_jitter = random.uniform(0.5, 1.5)
+                net_delay = min(30.0, 2.0 * attempt) + net_jitter
+                if is_network:
+                    logger.warning(
+                        "Network error pada percobaan %d/%d dengan key %s: %s. Backoff %.1fs...",
+                        attempt,
+                        max_attempts,
+                        mask_key(active_key),
+                        e,
+                        net_delay,
+                    )
+                else:
+                    logger.warning(
+                        "Percobaan %d/%d gagal dengan key %s: %s. Backoff %.1fs...",
+                        attempt,
+                        max_attempts,
+                        mask_key(active_key),
+                        e,
+                        net_delay,
+                    )
+                time.sleep(net_delay)
 
         raise RuntimeError(
-            f"Gagal menerjemahkan batch setelah {attempt} percobaan. Error terakhir: {last_error}"
+            f"Gagal menerjemahkan batch setelah {attempt} percobaan (batas maksimum: {max_attempts}). Error terakhir: {last_error}"
         )
 
     def calculate_dry_run_stats(
@@ -397,14 +719,259 @@ TUGAS DAN PRINSIP UTAMA:
         total_words = sum(len(seg.plain_text.split()) for seg in segments)
         # Rough estimation: 1 word ~ 1.33 tokens
         est_tokens = int(total_words * 1.33)
+        batches_count = len(batches)
+
+        # Free Tier estimation
+        min_minutes_rpm = round(batches_count / 15.0, 1)
+        rpd_limit = 1500
+        fits_daily = batches_count <= rpd_limit
 
         return {
             "total_segments": total_segments,
             "total_words": total_words,
             "total_chars": total_chars,
             "estimated_tokens": est_tokens,
-            "total_batches": len(batches),
+            "total_batches": batches_count,
             "model": self.config.model,
             "api_keys_count": len(self.config.api_keys),
+            "free_tier_rpm_min_minutes": min_minutes_rpm,
+            "free_tier_rpd_fits": fits_daily,
+            "free_tier_rpd_limit": rpd_limit,
         }
+
+
+class OllamaTranslator:
+    """Translates text segments using a local Ollama model (e.g. translategemma:4b)."""
+
+    def __init__(
+        self,
+        config: Config,
+        glossary: Optional[Glossary] = None,
+    ) -> None:
+        self.config = config
+        self.glossary = glossary
+        self.base_url = (config.ollama_base_url or "http://localhost:11434").rstrip("/")
+
+    def check_connection(self) -> bool:
+        """Verify that Ollama server is reachable and responsive."""
+        try:
+            req = urllib.request.Request(f"{self.base_url}/api/version", method="GET")
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                code = getattr(resp, "status", None)
+                if code is None and hasattr(resp, "getcode"):
+                    code = resp.getcode()
+                return code == 200
+        except Exception:
+            return False
+
+    def build_system_instruction(self) -> str:
+        """Build translation instructions for literary Indonesian translation."""
+        glossary_part = self.glossary.format_for_prompt() if self.glossary else ""
+        instruction = (
+            f"You are a professional literary translator from English ({self.config.source_lang}) to Indonesian ({self.config.target_lang}).\n"
+            "Your goal is to accurately convey the meaning of the source text while maintaining a natural, literary Indonesian tone.\n"
+            "Preserve all segment tags like [segment_id] and preserve all inline HTML tags like <em>, <strong>, <i>, <b>, <span>, <a href=\"...\"> wrapping the corresponding translated Indonesian words.\n"
+            "Translate line by line matching each segment tag."
+        )
+        if glossary_part:
+            instruction += f"\n\n{glossary_part}"
+        return instruction.strip()
+
+    def create_batches(
+        self, segments: List[TranslatableSegment]
+    ) -> List[List[TranslatableSegment]]:
+        """Group segments into batches respecting paragraph count and character limits."""
+        batches: List[List[TranslatableSegment]] = []
+        current_batch: List[TranslatableSegment] = []
+        current_chars = 0
+
+        for seg in segments:
+            seg_len = len(seg.inner_html)
+            exceeds_count = len(current_batch) >= self.config.batch_size
+            exceeds_chars = (current_chars + seg_len > self.config.max_batch_chars) and len(current_batch) > 0
+
+            if exceeds_count or exceeds_chars:
+                batches.append(current_batch)
+                current_batch = [seg]
+                current_chars = seg_len
+            else:
+                current_batch.append(seg)
+                current_chars += seg_len
+
+        if current_batch:
+            batches.append(current_batch)
+
+        return batches
+
+    def _call_ollama(self, prompt: str, timeout: Optional[float] = None) -> str:
+        """Execute a generate request to Ollama HTTP API."""
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.base_url}/api/generate"
+        req_timeout = timeout or self.config.request_timeout
+
+        payload = {
+            "model": self.config.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.1,
+                "top_p": 0.95,
+            },
+        }
+
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=req_data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=req_timeout) as resp:
+                res_body = json.loads(resp.read().decode("utf-8"))
+                return res_body.get("response", "").strip()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeError(
+                    f"Model '{self.config.model}' tidak ditemukan di Ollama ({self.base_url}). "
+                    f"Jalankan 'ollama pull {self.config.model}' terlebih dahulu."
+                ) from e
+            raise RuntimeError(f"Ollama HTTP error {e.code}: {e.reason}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                f"Tidak dapat terhubung ke Ollama di {self.base_url}. "
+                f"Pastikan Ollama sudah aktif ('ollama serve'). Error: {e.reason}"
+            ) from e
+
+    def _parse_segmented_response(self, text: str) -> Dict[str, str]:
+        """Parse tagged segments from model output."""
+        import re
+
+        parts = re.split(r"\[([a-zA-Z0-9_\-]+)\]", text)
+        result: Dict[str, str] = {}
+        for i in range(1, len(parts), 2):
+            tag = parts[i].strip()
+            val = parts[i + 1].strip()
+            if tag and val:
+                result[tag] = val
+        return result
+
+    def _translate_single(self, seg: TranslatableSegment) -> str:
+        """Fallback to translate a single segment if dropped from batch."""
+        import re
+
+        instruction = self.build_system_instruction()
+        prompt = (
+            f"{instruction}\n\n"
+            f"Translate the following segment directly. Preserve inline HTML tags:\n"
+            f"[{seg.id}] {seg.inner_html}"
+        )
+        resp_text = self._call_ollama(prompt, timeout=self.config.request_timeout)
+        parsed = self._parse_segmented_response(resp_text)
+        if seg.id in parsed and parsed[seg.id]:
+            return parsed[seg.id]
+        cleaned = re.sub(r"^\[.*?\]\s*", "", resp_text).strip()
+        return cleaned or seg.inner_html
+
+    def translate_batch(
+        self, batch: List[TranslatableSegment]
+    ) -> Dict[str, str]:
+        """Translate a batch of segments using Ollama with automatic retries and fallback."""
+        if not batch:
+            return {}
+
+        expected_ids = {seg.id for seg in batch}
+        instruction = self.build_system_instruction()
+
+        segment_lines = [f"[{seg.id}] {seg.inner_html}" for seg in batch]
+        prompt = (
+            f"{instruction}\n\n"
+            f"Translate the following segments:\n"
+            + "\n".join(segment_lines)
+        )
+
+        max_attempts = getattr(self.config, "max_retries", 3)
+        attempt = 0
+        last_error: Optional[Exception] = None
+
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                raw_response = self._call_ollama(prompt)
+                result_map = self._parse_segmented_response(raw_response)
+
+                missing_ids = expected_ids - set(result_map.keys())
+                if missing_ids:
+                    logger.warning(
+                        "Batch kekurangan %d segmen (%s). Melakukan fallback translasi individual...",
+                        len(missing_ids),
+                        list(missing_ids),
+                    )
+                    id_to_seg = {s.id: s for s in batch}
+                    for mid in missing_ids:
+                        seg = id_to_seg[mid]
+                        result_map[mid] = self._translate_single(seg)
+
+                return result_map
+
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                if "tidak ditemukan" in err_str or "tidak dapat terhubung" in err_str:
+                    raise
+
+                wait_sec = min(20.0, 2.0 * attempt)
+                logger.warning(
+                    "Ollama request gagal pada percobaan %d/%d: %s. Menunggu %.1fs...",
+                    attempt,
+                    max_attempts,
+                    e,
+                    wait_sec,
+                )
+                time.sleep(wait_sec)
+
+        raise RuntimeError(
+            f"Gagal menerjemahkan batch melalui Ollama setelah {attempt} percobaan. Error terakhir: {last_error}"
+        )
+
+    def calculate_dry_run_stats(
+        self, segments: List[TranslatableSegment]
+    ) -> Dict[str, Any]:
+        """Calculate token and segment metrics for --dry-run for local Ollama model."""
+        batches = self.create_batches(segments)
+        total_segments = len(segments)
+        total_chars = sum(seg.char_count for seg in segments)
+        total_words = sum(len(seg.plain_text.split()) for seg in segments)
+        est_tokens = int(total_words * 1.33)
+        batches_count = len(batches)
+
+        est_seconds = batches_count * 7.0
+        est_minutes = round(est_seconds / 60.0, 1)
+
+        return {
+            "total_segments": total_segments,
+            "total_words": total_words,
+            "total_chars": total_chars,
+            "estimated_tokens": est_tokens,
+            "total_batches": batches_count,
+            "model": self.config.model,
+            "provider": "ollama",
+            "base_url": self.base_url,
+            "estimated_local_minutes": est_minutes,
+        }
+
+
+def get_translator(
+    config: Config,
+    glossary: Optional[Glossary] = None,
+    key_manager: Optional[KeyManager] = None,
+):
+    """Factory function returning OllamaTranslator or GeminiTranslator based on config."""
+    if getattr(config, "provider", "ollama") == "gemini":
+        return GeminiTranslator(config, key_manager=key_manager, glossary=glossary)
+    return OllamaTranslator(config, glossary=glossary)
 
