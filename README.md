@@ -28,6 +28,12 @@ Dirancang khusus untuk menghasilkan terjemahan sastra/novel yang mengalir alami 
 - **Kompatibilitas XTEINK X4 Pro**:
   - Tanpa JavaScript, font eksternal, atau dependensi jaringan yang dapat membebani engine e-ink CrossInk / CrossPoint.
   - Struktur navigasi bab (NCX & Nav XHTML) tersinkronisasi.
+- **Web UI Interaktif & Akses Multi-Device**:
+  - Antarmuka web modern berbasis **Streamlit** yang mudah diakses dari browser komputer ataupun smartphone/tablet melalui jaringan Wi-Fi lokal.
+  - *Drag-and-drop* file `.epub` dan deteksi metadata otomatis (cover, judul, penulis, jumlah bab).
+  - **Preview Bilingual Per Bab**: Membandingkan teks asli bahasa Inggris dan hasil terjemahan bahasa Indonesia secara berdampingan (*side-by-side*).
+  - **Editor Glosarium Visual**: Tambah dan sesuaikan istilah serta catatan konteks langsung dari antarmuka web.
+  - **Dual Progress Bar & Live Log**: Pemantauan langsung persentase progres keseluruhan buku dan batch yang sedang berjalan.
 - **Estimasi Biaya (--dry-run)**:
   - Memperkirakan total kata, karakter, token teks, dan jumlah panggilan API sebelum eksekusi sungguhan.
 
@@ -38,6 +44,9 @@ Dirancang khusus untuk menghasilkan terjemahan sastra/novel yang mengalir alami 
 ```text
 epub-translator/
 ├── epub_translate.py      # Entry point CLI utama
+├── app_streamlit.py       # Aplikasi Web UI Streamlit
+├── runner.py              # Runner & Callback event engine terpadu
+├── run_ui.sh              # Skrip peluncur Web UI dengan multi-device IP banner
 ├── config.py              # Konfigurasi, parsing multi API key, dan masking
 ├── translator.py          # Integrasi Gemini API, KeyManager, prompt novel, dan retries
 ├── text_mapper.py         # Parser XHTML lxml, preservasi inline markup & rekonsiliasi DOM
@@ -45,7 +54,7 @@ epub-translator/
 ├── glossary.py            # Pengelola glosarium istilah & nama karakter
 ├── checkpoint.py          # Sistem checkpoint, caching status, dan resume berbasis hash
 ├── validator.py           # Validasi integritas EPUB built-in & Calibre ebook-validate
-├── requirements.txt       # Daftar dependensi Python
+├── requirements.txt       # Daftar dependensi Python (termasuk streamlit & pillow)
 ├── pytest.ini             # Konfigurasi pytest
 ├── .env.example           # Contoh template konfigurasi environment
 └── tests/                 # Test suite otomatis komprehensif
@@ -101,6 +110,34 @@ GEMINI_MODEL=gemini-2.5-flash
 ```
 
 > **Catatan Keamanan**: API key Anda tidak akan pernah ditampilkan secara lengkap di terminal atau file log. Aplikasi menerapkan fungsi *masking* otomatis (misal: `AIza...4xK9`).
+
+---
+
+## 🖥️ Menjalankan Web UI (Akses Mudah dari Browser & Smartphone)
+
+Aplikasi kini dilengkapi antarmuka web interaktif berbasis **Streamlit** untuk memudahkan penggunaan tanpa mengetik perintah terminal.
+
+### 1. Cara Menjalankan Web UI
+Jalankan salah satu perintah berikut di terminal:
+```bash
+# Opsi A: Menggunakan launcher script
+./run_ui.sh
+
+# Opsi B: Menggunakan flag CLI
+python epub_translate.py --ui
+```
+
+### 2. Cara Mengakses Web UI
+- **Dari Laptop/PC Komputer Ini:**
+  Buka browser dan kunjungi: `http://localhost:8501`
+- **Dari Smartphone / Tablet di Jaringan Wi-Fi yang Sama:**
+  Buka browser di HP/tablet Anda dan masukkan URL jaringan yang tampil di terminal (misal: `http://192.168.1.15:8501` atau IP LAN Anda).
+
+### 3. Fitur Utama Web UI
+- **Tab 1: 📚 Penerjemahan & Progres**: Drag-and-drop file EPUB, pilih model & API key, hitung estimasi biaya (*dry-run*), pantau dual progress bar & live log, serta unduh file hasil terjemahan langsung ke folder Downloads.
+- **Tab 2: 👁️ Preview Bilingual Per Bab**: Membandingkan teks asli bahasa Inggris dengan teks terjemahan bahasa Indonesia secara berdampingan untuk setiap bab.
+- **Tab 3: 📖 Glosarium Istilah**: Editor tabel interaktif untuk menambah/mengedit istilah nama karakter, lokasi, dan catatan konteks novel.
+- **Tab 4: 🛠️ Validasi EPUB**: Pemeriksaan kepatuhan standar format buku digital secara instan.
 
 ---
 

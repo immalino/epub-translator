@@ -530,9 +530,20 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=None, help="Batas waktu request timeout dalam detik.")
     parser.add_argument("--validate", action="store_true", help="Jalankan pemeriksaan validitas standar EPUB pada file output.")
     parser.add_argument("--checkpoint-dir", default=".epub_translate_cache", help="Direktori penyimpanan checkpoint.")
+    parser.add_argument("--ui", action="store_true", help="Luncurkan antarmuka grafis Web UI (Streamlit).")
     parser.add_argument("-v", "--verbose", action="store_true", help="Tampilkan log debug detail.")
 
     args = parser.parse_args()
+
+    if args.ui:
+        ui_script = Path(__file__).parent / "run_ui.sh"
+        if ui_script.is_file():
+            os.execv(str(ui_script), [str(ui_script)])
+        else:
+            streamlit_bin = Path(sys.executable).parent / "streamlit"
+            cmd = [str(streamlit_bin if streamlit_bin.is_file() else "streamlit"), "run", "app_streamlit.py"]
+            os.execvp(cmd[0], cmd)
+
     setup_logging(args.verbose)
 
     # Load Config

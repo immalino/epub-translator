@@ -80,6 +80,14 @@ def sanitize_xml_entities(s: str) -> str:
     return re.sub(r'&(?!(?:[a-zA-Z0-9]+|#[0-9]+|#x[0-9a-fA-F]+);)', '&amp;', s)
 
 
+# Regex to auto-close unclosed void tags in HTML5 documents (meta, link, img, hr, br, etc.)
+# so XMLParser does not incorrectly nest body inside head
+VOID_TAGS_PATTERN = re.compile(
+    r'<(meta|link|img|br|hr|input|source|area|base|col|embed|param|track|wbr)([^>]*?)(?<!/)>',
+    re.IGNORECASE,
+)
+
+
 class XHTMLTextMapper:
     """Parses and reconstructs XHTML documents with preserved structure."""
 
@@ -89,14 +97,18 @@ class XHTMLTextMapper:
     def extract_segments(self, xhtml_content: bytes | str) -> Tuple[etree._Element, List[TranslatableSegment]]:
         """Parse XHTML and extract all reader-visible translatable segments."""
         if isinstance(xhtml_content, str):
-            raw_bytes = xhtml_content.encode("utf-8")
+            raw_text = xhtml_content
         else:
-            raw_bytes = xhtml_content
+            raw_text = xhtml_content.decode("utf-8", errors="replace")
+
+        # Auto-close void tags (meta, link, hr, etc.) if not self-closed
+        sanitized_text = VOID_TAGS_PATTERN.sub(r'<\1\2 />', raw_text)
+        raw_bytes = sanitized_text.encode("utf-8")
 
         parser = etree.XMLParser(recover=True, remove_blank_text=False)
         try:
             tree = etree.fromstring(raw_bytes, parser=parser)
-        except Exception as e:
+        except Exception:
             # Fallback to HTML parser if XML parser fails completely
             tree = html.fromstring(raw_bytes)
 
@@ -112,8 +124,15 @@ class XHTMLTextMapper:
                 continue
 
             # Check if this element or an ancestor is in skip tags
-            ancestor_tags = {local_tag_name(anc) for anc in elem.iterancestors()}
-            if any(anc in SKIP_TAGS for anc in ancestor_tags):
+            ancestor_chain = [local_tag_name(anc) for anc in elem.iterancestors()]
+            # If element is inside body, any 'head' tag above body is an artifact of unclosed tags in head
+            if "body" in ancestor_chain:
+                body_idx = ancestor_chain.index("body")
+                check_ancestors = ancestor_chain[:body_idx]
+            else:
+                check_ancestors = ancestor_chain
+
+            if any(anc in SKIP_TAGS for anc in check_ancestors):
                 continue
 
             # Skip title if translate_titles is False
