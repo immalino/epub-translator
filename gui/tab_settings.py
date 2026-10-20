@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import Config, mask_key
+from config import Config, get_config_path, mask_key
 from translator import OllamaTranslator
 
 logger = logging.getLogger("epub_translate.gui.tab_settings")
@@ -682,22 +682,28 @@ class TabSettings(QWidget):
         *args,
         **kwargs,
     ) -> bool:
-        """Persist current settings directly to config.json, environment variables, and .env fallback."""
-        if not isinstance(env_path, (Path, str)) or isinstance(env_path, bool):
-            target_env = Path(".env")
-        else:
-            target_env = Path(env_path)
-
+        """Persist current settings directly to config.json and notify application."""
         cfg = self.get_config()
 
-        # 1. Direct persistence to config.json
-        json_path = target_env.parent / "config.json" if target_env.parent.is_dir() and target_env.name != ".env" else Path("config.json")
+        # 1. Determine destination paths
+        if isinstance(env_path, (Path, str)) and not isinstance(env_path, bool):
+            target_env = Path(env_path)
+            json_path = (
+                target_env.parent / "config.json"
+                if target_env.parent.is_dir() and target_env.name != ".env"
+                else get_config_path()
+            )
+        else:
+            target_env = None
+            json_path = get_config_path()
+
+        # 2. Direct persistence to config.json
         try:
             cfg.save(json_path)
         except Exception as exc:
             logger.warning("Gagal menyimpan config.json: %s", exc)
 
-        # 2. Update environment variables
+        # 3. Update environment variables in memory for current process
         os.environ["TRANSLATION_PROVIDER"] = cfg.provider
         if cfg.provider == "gemini":
             os.environ["GEMINI_MODEL"] = cfg.model
@@ -713,50 +719,46 @@ class TabSettings(QWidget):
         os.environ["MAX_RETRIES"] = str(cfg.max_retries)
         os.environ["OUTPUT_DIR"] = str(cfg.output_dir)
 
-        # 3. Write formatted .env for backward compatibility
-        env_content = [
-            "# =======================================================",
-            "# EPUB TRANSLATOR CONFIGURATION (.env)",
-            "# (Dihasilkan secara otomatis dari GUI Pengaturan)",
-            "# =======================================================",
-            "",
-            f"TRANSLATION_PROVIDER={cfg.provider}",
-            f"INPUT_DIR={cfg.input_dir}",
-            f"OUTPUT_DIR={cfg.output_dir}",
-            "",
-            "# Parameter Inferensi / Batching",
-            f"BATCH_SIZE={cfg.batch_size}",
-            f"REQUEST_TIMEOUT={cfg.request_timeout}",
-            f"MAX_RETRIES={cfg.max_retries}",
-            "",
-            "# Konfigurasi Google Gemini API",
-            f"GEMINI_API_KEY={' '.join(cfg.api_keys)}",
-            f"GEMINI_MODEL={self.combo_gemini_model.currentText().strip() or 'gemini-2.5-flash'}",
-            f"ROTATION_STRATEGY={cfg.rotate_strategy}",
-            "",
-            "# Konfigurasi Model Lokal Ollama",
-            f"OLLAMA_BASE_URL={cfg.ollama_base_url}",
-            f"OLLAMA_MODEL={self.input_ollama_model.text().strip() or 'translategemma:4b'}",
-            "",
-        ]
+        # 4. Write formatted .env only if explicitly requested (e.g. testing)
+        if target_env is not None:
+            env_content = [
+                "# =======================================================",
+                "# EPUB TRANSLATOR CONFIGURATION (.env)",
+                "# =======================================================",
+                "",
+                f"TRANSLATION_PROVIDER={cfg.provider}",
+                f"INPUT_DIR={cfg.input_dir}",
+                f"OUTPUT_DIR={cfg.output_dir}",
+                "",
+                "# Parameter Inferensi / Batching",
+                f"BATCH_SIZE={cfg.batch_size}",
+                f"REQUEST_TIMEOUT={cfg.request_timeout}",
+                f"MAX_RETRIES={cfg.max_retries}",
+                "",
+                "# Konfigurasi Google Gemini API",
+                f"GEMINI_API_KEY={' '.join(cfg.api_keys)}",
+                f"GEMINI_MODEL={self.combo_gemini_model.currentText().strip() or 'gemini-2.5-flash'}",
+                f"ROTATION_STRATEGY={cfg.rotate_strategy}",
+                "",
+                "# Konfigurasi Model Lokal Ollama",
+                f"OLLAMA_BASE_URL={cfg.ollama_base_url}",
+                f"OLLAMA_MODEL={self.input_ollama_model.text().strip() or 'translategemma:4b'}",
+                "",
+            ]
+            try:
+                with open(target_env, "w", encoding="utf-8") as f:
+                    f.write("\n".join(env_content))
+            except Exception as exc:
+                logger.warning("Gagal menulis target_env: %s", exc)
 
-        try:
-            with open(target_env, "w", encoding="utf-8") as f:
-                f.write("\n".join(env_content))
+        logger.info("Configuration successfully written to %s", json_path)
+        self.sig_config_saved.emit(cfg)
 
-            logger.info("Configuration successfully written to %s and %s", target_env, json_path)
-            self.sig_config_saved.emit(cfg)
-
-            if not quiet:
-                QMessageBox.information(
-                    self,
-                    "Pengaturan Berhasil Disimpan",
-                    "Pengaturan berhasil disimpan dan langsung diterapkan!\n"
-                    "Anda tidak perlu lagi mengedit file .env secara manual.",
-                )
-            return True
-        except Exception as exc:
-            logger.exception("Gagal menyimpan konfigurasi: %s", exc)
-            if not quiet:
-                QMessageBox.critical(self, "Gagal Menyimpan", f"Gagal menyimpan konfigurasi:\n{exc}")
-            return False
+        if not quiet:
+            QMessageBox.information(
+                self,
+                "Pengaturan Berhasil Disimpan",
+                f"Pengaturan berhasil disimpan ke {json_path.name} dan langsung diterapkan!\n"
+                "Aplikasi tidak lagi membaca atau bergantung pada file .env.",
+            )
+        return True

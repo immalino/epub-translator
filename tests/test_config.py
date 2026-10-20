@@ -48,3 +48,38 @@ def test_key_manager_fallback_on_rate_limit():
     assert "cooldown" in summary
     assert "ready" in summary
 
+
+def test_config_load_clean_by_default(tmp_path, monkeypatch):
+    """Config.load must NOT inherit environment variables or .env keys when starting fresh."""
+    monkeypatch.setenv("GEMINI_API_KEY", "LEAKED_ENV_KEY_123")
+    monkeypatch.setenv("GEMINI_API_KEYS", "LEAKED_ENV_KEY_456")
+
+    non_existent = tmp_path / "does_not_exist_config.json"
+    cfg = Config.load(file_path=non_existent)
+
+    # Must be pristine and empty
+    assert cfg.api_keys == []
+    assert cfg.provider == "gemini"
+
+
+def test_config_save_and_reload(tmp_path):
+    """Config.save and Config.load should roundtrip accurately with JSON."""
+    json_file = tmp_path / "custom_config.json"
+    cfg = Config(
+        provider="ollama",
+        model="translategemma:4b",
+        api_keys=["USER_KEY_1", "USER_KEY_2"],
+        batch_size=15,
+        request_timeout=45.0,
+    )
+    assert cfg.save(json_file) is True
+    assert json_file.is_file()
+
+    loaded = Config.load(file_path=json_file)
+    assert loaded.provider == "ollama"
+    assert loaded.model == "translategemma:4b"
+    assert loaded.api_keys == ["USER_KEY_1", "USER_KEY_2"]
+    assert loaded.batch_size == 15
+    assert loaded.request_timeout == 45.0
+
+

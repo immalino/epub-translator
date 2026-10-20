@@ -8,13 +8,43 @@ when hitting rate limits (HTTP 429).
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 from dotenv import load_dotenv
 
-# Load .env file if present
-load_dotenv()
+# Load .env file only when running as source script (not frozen in PyInstaller)
+if not getattr(sys, "frozen", False):
+    load_dotenv()
+
+
+def get_config_path() -> Path:
+    """Return the active configuration path (config.json).
+
+    If running frozen (PyInstaller executable):
+    - Checks next to the executable (portable mode).
+    - Falls back to user AppData / home directory if the executable dir is read-only.
+    When running from source / dev:
+    - Uses config.json in the current working directory.
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        exe_config = exe_dir / "config.json"
+        if exe_config.exists():
+            return exe_config
+        try:
+            test_file = exe_dir / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            return exe_config
+        except (PermissionError, OSError):
+            appdata = os.getenv("APPDATA") or os.getenv("XDG_CONFIG_HOME") or os.path.expanduser("~")
+            cfg_dir = Path(appdata) / "EPUBTranslator"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            return cfg_dir / "config.json"
+
+    return Path("config.json")
 
 
 def mask_key(key: str) -> str:
@@ -167,26 +197,60 @@ class Config:
         return cfg
 
     @classmethod
-    def load(cls, **overrides) -> Config:
-        """Load configuration: prioritizes config.json, then environment variables (.env)."""
-        config_file = Path("config.json")
-        json_data = {}
+    def load(cls, file_path: Optional[Path | str] = None, **overrides) -> Config:
+        """Load configuration for GUI / Desktop.
+
+        Loads settings from config.json. If config.json does not exist,
+        starts completely clean/empty (kosongan) with default settings
+        and NO API keys (does not take from .env or os.environ).
+        """
+        config_file = Path(file_path) if file_path else get_config_path()
+        json_data: dict = {}
         if config_file.is_file():
             try:
                 import json
                 with open(config_file, "r", encoding="utf-8") as f:
                     json_data = json.load(f)
             except Exception:
-                pass
+                json_data = {}
 
-        merged = dict(json_data)
-        merged.update({k: v for k, v in overrides.items() if v is not None})
-        return cls.from_env(**merged)
+        cfg = cls(
+            provider=json_data.get("provider", "gemini"),
+            model=json_data.get("model", "gemini-2.5-flash"),
+            batch_size=int(json_data.get("batch_size", 20)),
+            max_batch_chars=int(json_data.get("max_batch_chars", 3500)),
+            source_lang=json_data.get("source_lang", "en"),
+            target_lang=json_data.get("target_lang", "id"),
+            style=json_data.get("style", "natural"),
+            request_timeout=float(json_data.get("request_timeout", 60.0)),
+            input_dir=Path(json_data.get("input_dir", "input")),
+            output_dir=Path(json_data.get("output_dir", "output")),
+            ollama_base_url=json_data.get("ollama_base_url", "http://localhost:11434"),
+            api_keys=list(json_data.get("api_keys", [])),
+            max_retries=int(json_data.get("max_retries", 5)),
+            max_retries_per_key=int(json_data.get("max_retries_per_key", 3)),
+            key_cooldown_seconds=float(json_data.get("key_cooldown_seconds", 60.0)),
+            checkpoint_dir=Path(json_data.get("checkpoint_dir", ".epub_translate_cache")),
+            rotate_strategy=json_data.get("rotate_strategy", "round_robin"),
+            translate_metadata=bool(json_data.get("translate_metadata", False)),
+            dry_run=bool(json_data.get("dry_run", False)),
+            verbose=bool(json_data.get("verbose", False)),
+        )
 
-    def save(self, file_path: Path | str = "config.json") -> bool:
+        for k, v in overrides.items():
+            if v is not None and hasattr(cfg, k):
+                if k in ("input_dir", "output_dir", "checkpoint_dir"):
+                    setattr(cfg, k, Path(v))
+                else:
+                    setattr(cfg, k, v)
+
+        return cfg
+
+    def save(self, file_path: Optional[Path | str] = None) -> bool:
         """Persist configuration directly to config.json."""
         import json
-        path = Path(file_path)
+        path = Path(file_path) if file_path else get_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "provider": self.provider,
             "model": self.model,
@@ -198,6 +262,7 @@ class Config:
             "style": self.style,
             "request_timeout": self.request_timeout,
             "max_retries": self.max_retries,
+            "max_retries_per_key": self.max_retries_per_key,
             "key_cooldown_seconds": self.key_cooldown_seconds,
             "rotate_strategy": self.rotate_strategy,
             "ollama_base_url": self.ollama_base_url,

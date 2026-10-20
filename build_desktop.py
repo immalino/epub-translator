@@ -125,7 +125,12 @@ def run_checks(spec_file: Path) -> bool:
 
 
 def build_executable(spec_file: Path, clean: bool = True) -> int:
-    """Execute PyInstaller build using spec file."""
+    """Execute PyInstaller build using spec file, ensuring clean state without bundled secrets."""
+    dist_dir = Path("dist") / "EPUBTranslator"
+    if dist_dir.exists():
+        print(f"[*] Removing existing dist directory: {dist_dir}")
+        shutil.rmtree(dist_dir, ignore_errors=True)
+
     cmd = [sys.executable, "-m", "PyInstaller"]
     if clean:
         cmd.append("--clean")
@@ -135,7 +140,13 @@ def build_executable(spec_file: Path, clean: bool = True) -> int:
     result = subprocess.run(cmd)
 
     if result.returncode == 0:
-        dist_dir = Path("dist") / "EPUBTranslator"
+        # Guarantee no .env or config.json leaked into the packaged application
+        for forbidden in [".env", "config.json"]:
+            forbidden_path = dist_dir / forbidden
+            if forbidden_path.exists():
+                forbidden_path.unlink()
+                print(f"[CLEANUP] Removed leaked {forbidden} to ensure clean pristine state.")
+
         print("\n" + "=" * 60)
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
