@@ -32,7 +32,9 @@ from config import Config
 from gui import assets
 from gui.tab_bilingual import TabBilingual
 from gui.tab_glossary import TabGlossary
+from gui.tab_settings import TabSettings
 from gui.tab_translate import TabTranslate
+from gui.tab_validator import TabValidator
 from gui.worker import TranslationWorker
 
 logger = logging.getLogger("epub_translate.gui.main_window")
@@ -135,6 +137,14 @@ class MainWindow(QMainWindow):
         self.action_open_output.triggered.connect(self._on_open_output_folder)
         toolbar.addAction(self.action_open_output)
 
+        toolbar.addSeparator()
+
+        # 7. Pengaturan
+        self.action_settings = QAction(assets.get_settings_icon(), "Pengaturan", self)
+        self.action_settings.setStatusTip("Buka tab pengaturan mesin penerjemah dan API Keys")
+        self.action_settings.triggered.connect(lambda: self.tab_widget.setCurrentWidget(self.tab_settings))
+        toolbar.addAction(self.action_settings)
+
     def _setup_central_tabs(self) -> None:
         """Create central tab widget with 5 modular tabs."""
         self.tab_widget = QTabWidget(self)
@@ -158,17 +168,12 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.tab_glossary, assets.get_glossary_icon(), "Glosarium")
 
         # Tab 4: Pengaturan Mesin & API
-        self.tab_settings = PlaceholderTab(
-            "Pengaturan Mesin & Konfigurasi API",
-            "Atur model LLM (Gemini / Ollama), rotasi API Keys, rate limit, dan concurrency.",
-        )
+        self.tab_settings = TabSettings(parent=self)
+        self.tab_settings.sig_config_saved.connect(self._on_config_saved)
         self.tab_widget.addTab(self.tab_settings, assets.get_settings_icon(), "Pengaturan")
 
         # Tab 5: Validasi EPUB
-        self.tab_validator = PlaceholderTab(
-            "Validasi Standar EPUB",
-            "Cek kepatuhan XHTML, integritas tautan, cover metadata, dan konsistensi file terjemahan.",
-        )
+        self.tab_validator = TabValidator(parent=self)
         self.tab_widget.addTab(self.tab_validator, assets.get_validate_icon(), "Validasi")
 
         self.setCentralWidget(self.tab_widget)
@@ -179,7 +184,13 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
 
         # Permanent status widgets on the right
-        self.status_engine_label = QLabel("Mesin: Gemini 2.5 Flash | API Keys: Siap")
+        cfg = Config.load()
+        if cfg.provider == "gemini":
+            keys_info = f"{len(cfg.api_keys)} Kunci" if cfg.api_keys else "Siap"
+            self.status_engine_label = QLabel(f"Mesin: {cfg.model} | API Keys: {keys_info}")
+        else:
+            self.status_engine_label = QLabel(f"Mesin: {cfg.model} (Ollama)")
+
         self.status_engine_label.setStyleSheet("padding: 0 8px; color: #334155;")
         status_bar.addPermanentWidget(self.status_engine_label)
 
@@ -188,6 +199,15 @@ class MainWindow(QMainWindow):
         status_bar.addPermanentWidget(self.status_checkpoint_label)
 
         status_bar.showMessage("Siap")
+
+    def _on_config_saved(self, config: Config) -> None:
+        """Update status bar when settings are saved."""
+        if config.provider == "gemini":
+            keys_info = f"{len(config.api_keys)} Kunci" if config.api_keys else "Tanpa Kunci"
+            self.status_engine_label.setText(f"Mesin: {config.model} | API Keys: {keys_info}")
+        else:
+            self.status_engine_label.setText(f"Mesin: {config.model} (Ollama)")
+        self.statusBar().showMessage("Pengaturan berhasil diperbarui.", 3000)
 
     # =========================================================================
     # Toolbar Action Handlers & EPUB Management
@@ -253,7 +273,7 @@ class MainWindow(QMainWindow):
         stem = self.current_epub_path.stem
         output_file = self.output_directory / f"{stem}_id.epub"
 
-        config = Config.load()
+        config = self.tab_settings.get_config()
         glossary = self.tab_glossary.get_glossary()
         glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
         self.tab_bilingual.glossary = glossary_to_pass
@@ -340,7 +360,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        config = Config.load()
+        config = self.tab_settings.get_config()
         glossary = self.tab_glossary.get_glossary()
         glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
         self.tab_translate.current_glossary = glossary_to_pass
@@ -373,12 +393,20 @@ class MainWindow(QMainWindow):
         msg = f"Penerjemahan selesai dalam {elapsed:.1f} detik."
         self.statusBar().showMessage(msg, 5000)
         logger.info("Translation completed. Output: %s, Elapsed: %.1fs", output_path, elapsed)
-        QMessageBox.information(
+
+        self.tab_validator.set_epub_path(output_path)
+        reply = QMessageBox.question(
             self,
             "Penerjemahan Selesai",
             f"File EPUB berhasil diterjemahkan dalam {elapsed:.1f} detik!\n\n"
-            f"Tersimpan di:\n{output_path}",
+            f"Tersimpan di:\n{output_path}\n\n"
+            "Apakah Anda ingin membuka Tab Validasi untuk memverifikasi dokumen ini?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
         )
+        if reply == QMessageBox.Yes:
+            self.tab_widget.setCurrentWidget(self.tab_validator)
+            self.tab_validator.run_validation()
 
     def _on_translation_error(self, error_msg: str) -> None:
         """Handle translation error signal."""
