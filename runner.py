@@ -460,6 +460,7 @@ class TranslationRunner:
                         translations=trans_map,
                     )
                     cb.on_batch_complete(ch_idx, b_idx, len(batches), len(batch), is_cache=False)
+                    time.sleep(0.5)
                 except GeminiDailyQuotaExhaustedError as e:
                     cb.on_log("ERROR", f"  Batas kuota Gemini API tercapai pada batch {batch_id}: {e}")
                     checkpoint.record_batch_failure(

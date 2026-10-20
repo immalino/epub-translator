@@ -578,9 +578,13 @@ TUGAS DAN PRINSIP UTAMA:
 
                     if not result_text:
                         c_info = ""
+                        if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+                            pb = response.prompt_feedback
+                            if getattr(pb, "block_reason", None):
+                                c_info += f" [prompt_blocked={pb.block_reason}]"
                         if response.candidates:
                             c0 = response.candidates[0]
-                            c_info = f" (finish_reason={c0.finish_reason}, safety={getattr(c0, 'safety_ratings', None)})"
+                            c_info += f" (finish_reason={c0.finish_reason}, safety={getattr(c0, 'safety_ratings', None)})"
                         raise ValueError(f"Empty response received from Gemini API{c_info}")
 
                     # Strip code fences if present
@@ -675,6 +679,20 @@ TUGAS DAN PRINSIP UTAMA:
                     )
                     continue
 
+                # Check if error is Empty response, safety filter, or dropped segments
+                is_throttle = "empty response" in err_str or "dropped" in err_str or "prompt_blocked" in err_str
+                if is_throttle:
+                    throttle_delay = min(25.0, 3.5 * attempt + random.uniform(1.0, 2.5))
+                    logger.warning(
+                        "Respons kosong/pembatasan dari Gemini API pada percobaan %d/%d dengan key %s. Cooldown %.1fs...",
+                        attempt,
+                        max_attempts,
+                        mask_key(active_key),
+                        throttle_delay,
+                    )
+                    time.sleep(throttle_delay)
+                    continue
+
                 # Network error or transient exception
                 is_network = (
                     isinstance(e, (ConnectionError, TimeoutError, OSError))
@@ -704,6 +722,39 @@ TUGAS DAN PRINSIP UTAMA:
                         net_delay,
                     )
                 time.sleep(net_delay)
+
+        # After all attempts exhausted:
+        # If the failure is due to content safety filter or empty response:
+        # Sub-divide the batch or gracefully preserve original text so novel translation never crashes!
+        err_msg = str(last_error).lower()
+        if "empty response" in err_msg or "blocked" in err_msg or "dropped" in err_msg:
+            if len(batch) > 1:
+                logger.warning(
+                    "Batch (%d segmen) gagal respons Gemini (%s). Mencoba menerjemahkan per segmen secara individual...",
+                    len(batch),
+                    last_error,
+                )
+                sub_map: Dict[str, str] = {}
+                for single_seg in batch:
+                    try:
+                        res = self.translate_batch([single_seg])
+                        sub_map.update(res)
+                    except Exception as sub_err:
+                        logger.warning(
+                            "Segmen %s tidak dapat diterjemahkan (%s). Mempertahankan teks asli agar buku tidak gagal.",
+                            single_seg.id,
+                            sub_err,
+                        )
+                        sub_map[single_seg.id] = single_seg.inner_html
+                return sub_map
+
+            # Single segment fallback
+            logger.warning(
+                "Segmen %s diblokir atau respons kosong (%s). Mempertahankan teks asli agar buku tidak gagal.",
+                batch[0].id,
+                last_error,
+            )
+            return {batch[0].id: batch[0].inner_html}
 
         raise RuntimeError(
             f"Gagal menerjemahkan batch setelah {attempt} percobaan (batas maksimum: {max_attempts}). Error terakhir: {last_error}"
