@@ -44,14 +44,14 @@ jobs:
         run: |
           python build_desktop.py
 
-      - name: Set up Inno Setup
-        uses: mvnoy/setup-inno-setup@v3
-        with:
-          version: "6.3.3"
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
 
       - name: Compile Inno Setup Installer
         run: |
-          iscc installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" installer.iss
 
       - name: Upload Standalone App Artifact
         uses: actions/upload-artifact@v4
