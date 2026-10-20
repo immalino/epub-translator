@@ -338,7 +338,7 @@ class TabSettings(QWidget):
             "padding: 8px 20px; border-radius: 6px; font-size: 13px; } "
             "QPushButton:hover { background-color: #0369a1; }"
         )
-        self.btn_save.clicked.connect(self.save_settings)
+        self.btn_save.clicked.connect(lambda: self.save_settings(quiet=False))
         bottom_bar.addWidget(self.btn_save)
 
         outer_layout.addWidget(bottom_frame)
@@ -675,12 +675,23 @@ class TabSettings(QWidget):
         )
         return cfg
 
-    def save_settings(self, env_path: Path = Path(".env"), quiet: bool = False) -> bool:
+    def save_settings(
+        self,
+        env_path: Path | str | None = None,
+        quiet: bool = False,
+        *args,
+        **kwargs,
+    ) -> bool:
         """Persist current settings directly to config.json, environment variables, and .env fallback."""
+        if not isinstance(env_path, (Path, str)) or isinstance(env_path, bool):
+            target_env = Path(".env")
+        else:
+            target_env = Path(env_path)
+
         cfg = self.get_config()
 
         # 1. Direct persistence to config.json
-        json_path = env_path.parent / "config.json" if env_path.parent.is_dir() and env_path.name != ".env" else Path("config.json")
+        json_path = target_env.parent / "config.json" if target_env.parent.is_dir() and target_env.name != ".env" else Path("config.json")
         try:
             cfg.save(json_path)
         except Exception as exc:
@@ -730,10 +741,10 @@ class TabSettings(QWidget):
         ]
 
         try:
-            with open(env_path, "w", encoding="utf-8") as f:
+            with open(target_env, "w", encoding="utf-8") as f:
                 f.write("\n".join(env_content))
 
-            logger.info("Configuration successfully written to %s and %s", env_path, json_path)
+            logger.info("Configuration successfully written to %s and %s", target_env, json_path)
             self.sig_config_saved.emit(cfg)
 
             if not quiet:
