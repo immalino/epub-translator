@@ -128,12 +128,13 @@ def test_runner_cancellation_cooperative(tmp_path):
     cancel_event = threading.Event()
     cancel_event.set()  # Cancel immediately before processing
 
-    exit_code = TranslationRunner.run_translation(
-        input_path=src_epub,
-        output_path=out_epub,
-        config=config,
-        cancel_event=cancel_event,
-    )
+    with patch("runner.OllamaTranslator.check_connection", return_value=True):
+        exit_code = TranslationRunner.run_translation(
+            input_path=src_epub,
+            output_path=out_epub,
+            config=config,
+            cancel_event=cancel_event,
+        )
 
     assert exit_code == 3
     # Output epub shouldn't be finalized because translation was cancelled

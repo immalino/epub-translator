@@ -338,6 +338,9 @@ class TranslationRunner:
 
             return False
 
+        if _check_interruption():
+            return 3
+
         if not input_path.is_file():
             cb.on_log("ERROR", f"File input tidak ditemukan: {input_path}")
             return 1
