@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -314,9 +315,28 @@ class TranslationRunner:
         retry_failed: bool = False,
         glossary: Optional[Glossary] = None,
         callback: Optional[TranslationCallback] = None,
+        pause_event: Optional[threading.Event] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> int:
         """Execute translation with real-time callback hooks."""
         cb = callback or TranslationCallback()
+
+        def _check_interruption() -> bool:
+            """Check cancellation and handle pause. Returns True if cancelled."""
+            if cancel_event and cancel_event.is_set():
+                cb.on_log("WARNING", "Proses terjemahan dibatalkan oleh pengguna.")
+                return True
+
+            if pause_event and pause_event.is_set():
+                cb.on_log("INFO", "Proses terjemahan dijeda. Menunggu untuk dilanjutkan...")
+                while pause_event.is_set():
+                    if cancel_event and cancel_event.is_set():
+                        cb.on_log("WARNING", "Proses terjemahan dibatalkan saat dijeda.")
+                        return True
+                    time.sleep(0.1)
+                cb.on_log("INFO", "Proses terjemahan dilanjutkan.")
+
+            return False
 
         if not input_path.is_file():
             cb.on_log("ERROR", f"File input tidak ditemukan: {input_path}")
@@ -388,6 +408,9 @@ class TranslationRunner:
         failed_chapters = 0
 
         for ch_idx, spine_item in enumerate(target_spine, 1):
+            if _check_interruption():
+                return 3
+
             zip_path = spine_item.manifest_item.full_zip_path
             segments = chapter_segments[zip_path]
             tree = chapter_trees[zip_path]
@@ -408,6 +431,9 @@ class TranslationRunner:
             chapter_has_failure = False
 
             for b_idx, batch in enumerate(batches, 1):
+                if _check_interruption():
+                    return 3
+
                 batch_id = f"b{b_idx:03d}"
                 item_ids = [s.id for s in batch]
                 batch_src_hash = CheckpointManager.compute_content_hash("".join(s.inner_html for s in batch))
@@ -472,6 +498,8 @@ class TranslationRunner:
         # Build output EPUB
         report = None
         if output_path and modified_files:
+            if _check_interruption():
+                return 3
             cb.on_log("INFO", f"Menyusun file EPUB hasil ke: {output_path.name}")
             EPUBBuilder.build(
                 source_epub=input_path,
