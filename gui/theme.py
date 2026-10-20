@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
 logger = logging.getLogger("epub_translate.gui.theme")
@@ -116,7 +116,8 @@ QTabBar::tab:selected {
    ========================================================================== */
 QTableWidget, QTableView {
     background-color: #ffffff;
-    alternate-background-color: #fcfdfd;
+    alternate-background-color: #f8fafc;
+    color: #0f172a;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     gridline-color: #f1f5f9;
@@ -124,12 +125,19 @@ QTableWidget, QTableView {
     selection-color: #0369a1;
 }
 
-QTableWidget::item {
-    padding: 4px 6px;
+QTableWidget::item, QTableView::item {
+    color: #0f172a;
+    background-color: transparent;
+    padding: 6px 8px;
     border: none;
 }
 
-QTableWidget::item:focus {
+QTableWidget::item:selected, QTableView::item:selected {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+
+QTableWidget::item:focus, QTableView::item:focus {
     background-color: #e0f2fe;
     color: #0369a1;
 }
@@ -223,7 +231,7 @@ QPushButton#primaryButton:pressed {
 /* ==========================================================================
    Input Controls: QLineEdit, QComboBox, QSpinBox, QPlainTextEdit
    ========================================================================== */
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
@@ -233,14 +241,87 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     font-size: 12px;
 }
 
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
     border: 1.5px solid #0284c7;
     background-color: #ffffff;
 }
 
-QComboBox::drop-down {
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 4px 28px 4px 10px;
+    color: #0f172a;
+    min-height: 24px;
+    font-size: 12px;
+}
+
+QComboBox:focus {
+    border: 1.5px solid #0284c7;
+}
+
+QComboBox:editable {
+    background-color: #ffffff;
+    color: #0f172a;
+}
+
+QComboBox:editable QLineEdit {
+    background: transparent;
     border: none;
-    width: 20px;
+    color: #0f172a;
+    padding: 0px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #e2e8f0;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+    background-color: #f8fafc;
+}
+
+QComboBox::drop-down:hover {
+    background-color: #f1f5f9;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    width: 0px;
+    height: 0px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #64748b;
+    margin-right: 2px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    selection-background-color: #e0f2fe;
+    selection-color: #0369a1;
+    outline: none;
+    padding: 4px;
+}
+
+QComboBox QAbstractItemView::item {
+    color: #0f172a;
+    background-color: #ffffff;
+    padding: 6px 10px;
+    min-height: 22px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: #f1f5f9;
+    color: #0f172a;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background-color: #e0f2fe;
+    color: #0369a1;
 }
 
 QPlainTextEdit, QTextEdit {
@@ -280,15 +361,54 @@ QGroupBox::title {
    QRadioButton & QCheckBox
    ========================================================================== */
 QRadioButton, QCheckBox {
-    color: #1e293b;
+    color: #0f172a;
     font-size: 12px;
-    spacing: 6px;
+    spacing: 8px;
     background-color: transparent;
 }
 
-QRadioButton::indicator, QCheckBox::indicator {
+QRadioButton::indicator {
     width: 16px;
     height: 16px;
+    border-radius: 9px;
+    border: 1.5px solid #94a3b8;
+    background-color: #ffffff;
+}
+
+QRadioButton::indicator:hover {
+    border-color: #0284c7;
+}
+
+QRadioButton::indicator:checked {
+    border: 5px solid #0284c7;
+    background-color: #ffffff;
+}
+
+QRadioButton::indicator:disabled {
+    border-color: #cbd5e1;
+    background-color: #f1f5f9;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid #94a3b8;
+    background-color: #ffffff;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #0284c7;
+}
+
+QCheckBox::indicator:checked {
+    border: 5px solid #0284c7;
+    background-color: #ffffff;
+}
+
+QCheckBox::indicator:disabled {
+    border-color: #cbd5e1;
+    background-color: #f1f5f9;
 }
 
 /* ==========================================================================
@@ -396,6 +516,21 @@ def apply_calibre_theme(app: QApplication) -> None:
 
     default_font.setPointSize(10)
     app.setFont(default_font)
+
+    # Force clean light palette across Windows/Linux to prevent dark mode OS bleed-through
+    palette = app.palette()
+    palette.setColor(QPalette.Window, QColor("#f8fafc"))
+    palette.setColor(QPalette.WindowText, QColor("#0f172a"))
+    palette.setColor(QPalette.Base, QColor("#ffffff"))
+    palette.setColor(QPalette.AlternateBase, QColor("#f8fafc"))
+    palette.setColor(QPalette.Text, QColor("#0f172a"))
+    palette.setColor(QPalette.Button, QColor("#ffffff"))
+    palette.setColor(QPalette.ButtonText, QColor("#334155"))
+    palette.setColor(QPalette.Highlight, QColor("#e0f2fe"))
+    palette.setColor(QPalette.HighlightedText, QColor("#0369a1"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+    palette.setColor(QPalette.ToolTipText, QColor("#0f172a"))
+    app.setPalette(palette)
 
     # Apply stylesheet
     app.setStyleSheet(CALIBRE_QSS)

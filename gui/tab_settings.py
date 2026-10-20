@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -366,18 +367,26 @@ class TabSettings(QWidget):
         # Col 0: Index
         item_idx = QTableWidgetItem(str(row + 1))
         item_idx.setTextAlignment(Qt.AlignCenter)
+        item_idx.setForeground(QColor("#475569"))
         item_idx.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.table_keys.setItem(row, 0, item_idx)
 
         # Col 1: API Key input item
         item_key = QTableWidgetItem(key_text.strip())
         item_key.setData(Qt.UserRole, key_text.strip())
+        item_key.setForeground(QColor("#0f172a"))
         item_key.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
         self.table_keys.setItem(row, 1, item_key)
 
         # Col 2: Status item
         item_st = QTableWidgetItem(status)
         item_st.setTextAlignment(Qt.AlignCenter)
+        if any(w in status.lower() for w in ["aktif", "siap", "tersimpan", "ok"]):
+            item_st.setForeground(QColor("#0284c7"))
+        elif any(w in status.lower() for w in ["gagal", "tidak valid", "limit", "error"]):
+            item_st.setForeground(QColor("#dc2626"))
+        else:
+            item_st.setForeground(QColor("#64748b"))
         item_st.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.table_keys.setItem(row, 2, item_st)
 
@@ -448,6 +457,7 @@ class TabSettings(QWidget):
                 item.setText(mask_key(orig) if orig else "")
             else:
                 item.setText(orig)
+            item.setForeground(QColor("#0f172a"))
 
     def get_api_keys(self) -> List[str]:
         """Extract clean list of API keys from the table."""
@@ -496,12 +506,15 @@ class TabSettings(QWidget):
                 continue
 
             item_st.setText("Menguji...")
+            item_st.setForeground(QColor("#d97706"))
             ok, msg = self.test_gemini_key(k, model_name)
             if ok:
                 item_st.setText("🟢 Aktif")
+                item_st.setForeground(QColor("#16a34a"))
                 valid_count += 1
             else:
                 item_st.setText(f"🔴 {msg}")
+                item_st.setForeground(QColor("#dc2626"))
 
         QMessageBox.information(
             self,
