@@ -468,10 +468,10 @@ class TabTranslate(QWidget):
         if not hasattr(self, "label_engine_summary") or self.label_engine_summary is None:
             return
         if cfg.provider == "gemini":
-            keys_info = f"{len(cfg.api_keys)} Kunci API" if cfg.api_keys else "⚠️ Belum ada Kunci API"
-            self.label_engine_summary.setText(f"🤖 Mesin: Google Gemini ({cfg.model}) • {keys_info}")
+            keys_info = f"{len(cfg.api_keys)} Kunci API" if cfg.api_keys else "Belum ada Kunci API"
+            self.label_engine_summary.setText(f"Mesin: Google Gemini ({cfg.model}) • {keys_info}")
         else:
-            self.label_engine_summary.setText(f"🤖 Mesin: Ollama ({cfg.model})")
+            self.label_engine_summary.setText(f"Mesin: Ollama ({cfg.model})")
 
     def load_epub(self, file_path: str | Path) -> None:
         """Inspect EPUB file, populate book info, cover, and chapter table."""

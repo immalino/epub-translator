@@ -179,6 +179,8 @@ class MainWindow(QMainWindow):
         self.tab_validator = TabValidator(parent=self)
         self.tab_widget.addTab(self.tab_validator, assets.get_validate_icon(), "Validasi")
 
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
         self.setCentralWidget(self.tab_widget)
 
     def _setup_statusbar(self) -> None:
@@ -197,11 +199,18 @@ class MainWindow(QMainWindow):
         self.status_engine_label.setStyleSheet("padding: 0 8px; color: #334155;")
         status_bar.addPermanentWidget(self.status_engine_label)
 
-        self.status_checkpoint_label = QLabel("💾 Checkpoint: Aktif")
+        self.status_checkpoint_label = QLabel("Checkpoint: Aktif")
         self.status_checkpoint_label.setStyleSheet("padding: 0 8px; color: #0284c7; font-weight: 500;")
         status_bar.addPermanentWidget(self.status_checkpoint_label)
 
         status_bar.showMessage("Siap")
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Sync live configuration whenever user switches tabs."""
+        if hasattr(self, "tab_settings"):
+            cfg = self.tab_settings.get_config()
+            self.tab_settings.save_settings(quiet=True)
+            self._on_config_saved(cfg)
 
     def _on_config_saved(self, config: Config) -> None:
         """Update status bar and tab views when settings are saved."""

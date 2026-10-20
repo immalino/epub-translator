@@ -62,6 +62,7 @@ class TabSettings(QWidget):
         super().__init__(parent)
 
         self._keys_masked: bool = False
+        self._is_loading_config: bool = False
         self._setup_ui()
         self.load_config(Config.load())
         logger.info("TabSettings initialized successfully.")
@@ -307,13 +308,27 @@ class TabSettings(QWidget):
         adv_layout.addLayout(paths_row)
         layout.addWidget(adv_group)
 
+        self.scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(self.scroll_area, stretch=1)
+
         # ---------------------------------------------------------------------
-        # 5. Bottom Action Buttons
+        # 5. Persistent Bottom Action Bar (Pinned footer, always visible)
         # ---------------------------------------------------------------------
-        bottom_bar = QHBoxLayout()
+        bottom_frame = QFrame()
+        bottom_frame.setObjectName("settingsFooter")
+        bottom_frame.setStyleSheet(
+            "QFrame#settingsFooter { background-color: #ffffff; border-top: 1px solid #e2e8f0; padding: 4px 10px; }"
+        )
+        bottom_bar = QHBoxLayout(bottom_frame)
+        bottom_bar.setContentsMargins(10, 6, 10, 6)
+
+        self.lbl_save_status = QLabel("Pengaturan otomatis tersimpan.")
+        self.lbl_save_status.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: 500;")
+        bottom_bar.addWidget(self.lbl_save_status)
+
         bottom_bar.addStretch()
 
-        self.btn_reload = QPushButton("Muat Ulang Pengaturan")
+        self.btn_reload = QPushButton("Muat Ulang")
         self.btn_reload.clicked.connect(lambda: self.load_config(Config.load()))
         bottom_bar.addWidget(self.btn_reload)
 
@@ -326,10 +341,22 @@ class TabSettings(QWidget):
         self.btn_save.clicked.connect(self.save_settings)
         bottom_bar.addWidget(self.btn_save)
 
-        layout.addLayout(bottom_bar)
+        outer_layout.addWidget(bottom_frame)
 
-        self.scroll_area.setWidget(content_widget)
-        outer_layout.addWidget(self.scroll_area)
+        # Connect live changes to auto-save and notify other tabs immediately
+        self.combo_gemini_model.currentTextChanged.connect(self._on_auto_save_setting)
+        self.combo_rotation.currentIndexChanged.connect(self._on_auto_save_setting)
+        self.input_ollama_model.textChanged.connect(self._on_auto_save_setting)
+        self.radio_gemini.toggled.connect(self._on_auto_save_setting)
+        self.radio_ollama.toggled.connect(self._on_auto_save_setting)
+
+    def _on_auto_save_setting(self, *args) -> None:
+        """Silently auto-persist settings and notify other tabs upon change."""
+        if getattr(self, "_is_loading_config", False):
+            return
+        self.save_settings(quiet=True)
+        if hasattr(self, "lbl_save_status"):
+            self.lbl_save_status.setText("Pengaturan otomatis tersimpan.")
 
     # =========================================================================
     # Provider Toggling
@@ -578,44 +605,48 @@ class TabSettings(QWidget):
 
     def load_config(self, config: Config) -> None:
         """Populate settings widgets from a Config instance."""
-        # Provider
-        if config.provider == "ollama":
-            self.radio_ollama.setChecked(True)
-        else:
-            self.radio_gemini.setChecked(True)
+        self._is_loading_config = True
+        try:
+            # Provider
+            if config.provider == "ollama":
+                self.radio_ollama.setChecked(True)
+            else:
+                self.radio_gemini.setChecked(True)
 
-        # Gemini Keys
-        self.table_keys.setRowCount(0)
-        for k in config.api_keys:
-            self.add_key_row(k, status="Tersimpan")
+            # Gemini Keys
+            self.table_keys.setRowCount(0)
+            for k in config.api_keys:
+                self.add_key_row(k, status="Tersimpan")
 
-        # Gemini Model
-        idx = self.combo_gemini_model.findText(config.model)
-        if idx >= 0:
-            self.combo_gemini_model.setCurrentIndex(idx)
-        else:
-            self.combo_gemini_model.setEditText(config.model)
+            # Gemini Model
+            idx = self.combo_gemini_model.findText(config.model)
+            if idx >= 0:
+                self.combo_gemini_model.setCurrentIndex(idx)
+            else:
+                self.combo_gemini_model.setEditText(config.model)
 
-        # Rotation Strategy
-        idx_rot = self.combo_rotation.findData(config.rotate_strategy)
-        if idx_rot >= 0:
-            self.combo_rotation.setCurrentIndex(idx_rot)
+            # Rotation Strategy
+            idx_rot = self.combo_rotation.findData(config.rotate_strategy)
+            if idx_rot >= 0:
+                self.combo_rotation.setCurrentIndex(idx_rot)
 
-        # Ollama
-        self.input_ollama_url.setText(config.ollama_base_url or "http://localhost:11434")
-        if config.provider == "ollama":
-            self.input_ollama_model.setText(config.model)
+            # Ollama
+            self.input_ollama_url.setText(config.ollama_base_url or "http://localhost:11434")
+            if config.provider == "ollama":
+                self.input_ollama_model.setText(config.model)
 
-        # Advanced
-        self.spin_batch_size.setValue(config.batch_size or 20)
-        self.spin_timeout.setValue(int(config.request_timeout or 60))
-        self.spin_retries.setValue(config.max_retries or 5)
-        self.spin_cooldown.setValue(config.key_cooldown_seconds or 60.0)
+            # Advanced
+            self.spin_batch_size.setValue(config.batch_size or 20)
+            self.spin_timeout.setValue(int(config.request_timeout or 60))
+            self.spin_retries.setValue(config.max_retries or 5)
+            self.spin_cooldown.setValue(config.key_cooldown_seconds or 60.0)
 
-        self.input_output_dir.setText(str(config.output_dir))
-        self.input_cache_dir.setText(str(config.checkpoint_dir))
+            self.input_output_dir.setText(str(config.output_dir))
+            self.input_cache_dir.setText(str(config.checkpoint_dir))
 
-        self._on_provider_changed()
+            self._on_provider_changed()
+        finally:
+            self._is_loading_config = False
 
     def get_config(self) -> Config:
         """Assemble and return Config object from current GUI inputs."""
