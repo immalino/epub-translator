@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -176,38 +177,37 @@ class TabTranslate(QWidget):
         self._set_placeholder_cover()
 
     def _setup_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(10)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("tabTranslateScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_widget.setObjectName("tabTranslateContent")
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(12, 12, 12, 12)
+        content_layout.setSpacing(12)
 
         # 1. Book Info Panel (Top)
-        main_layout.addWidget(self._create_book_info_panel())
+        content_layout.addWidget(self._create_book_info_panel())
 
-        # Splitter between Chapters Table (Middle) and Monitor/Log (Bottom)
-        splitter = QSplitter(Qt.Vertical, self)
-        splitter.setChildrenCollapsible(False)
+        # 2. Chapter Table Panel (Middle)
+        content_layout.addWidget(self._create_chapter_table_panel())
 
-        # 2. Chapter Table Panel (Upper Pane of Splitter)
-        table_container = self._create_chapter_table_panel()
-        splitter.addWidget(table_container)
+        # 3. Progress Bars Panel
+        content_layout.addWidget(self._create_progress_panel())
 
-        # 3. Bottom Container: Progress Bars + Log Console (Lower Pane of Splitter)
-        bottom_container = QWidget()
-        bottom_layout = QVBoxLayout(bottom_container)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(8)
+        # 4. Live Log Console Panel
+        content_layout.addWidget(self._create_log_console_panel())
 
-        # Progress Bars Panel
-        bottom_layout.addWidget(self._create_progress_panel())
-
-        # Live Log Console Panel
-        bottom_layout.addWidget(self._create_log_console_panel())
-
-        splitter.addWidget(bottom_container)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 4)
-
-        main_layout.addWidget(splitter)
+        self.scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(self.scroll_area)
 
     # =========================================================================
     # Panel Creators
@@ -347,6 +347,7 @@ class TabTranslate(QWidget):
         self.table_chapters.setColumnWidth(3, 85)
         self.table_chapters.setColumnWidth(4, 95)
         self.table_chapters.setColumnWidth(5, 110)
+        self.table_chapters.setMinimumHeight(180)
 
         self.table_chapters.itemChanged.connect(self._on_table_item_changed)
         layout.addWidget(self.table_chapters)
@@ -356,15 +357,16 @@ class TabTranslate(QWidget):
     def _create_progress_panel(self) -> QGroupBox:
         """Create the dual progress bars panel."""
         group = QGroupBox("Kemajuan Terjemahan")
+        group.setMinimumHeight(175)
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
 
         # 1. Overall Progress
         overall_header = QHBoxLayout()
         overall_title = QLabel("<b>Progres Keseluruhan Buku:</b>")
         self.label_overall_percent = QLabel("0%")
-        self.label_overall_percent.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.label_overall_percent.setStyleSheet("font-weight: bold; color: #0284c7; font-size: 13px;")
         overall_header.addWidget(overall_title)
         overall_header.addStretch()
         overall_header.addWidget(self.label_overall_percent)
@@ -374,6 +376,7 @@ class TabTranslate(QWidget):
         self.progress_overall.setObjectName("overallProgress")
         self.progress_overall.setRange(0, 100)
         self.progress_overall.setValue(0)
+        self.progress_overall.setMinimumHeight(22)
         self.progress_overall.setTextVisible(True)
         layout.addWidget(self.progress_overall)
 
@@ -381,13 +384,13 @@ class TabTranslate(QWidget):
         self.label_overall_status.setStyleSheet("color: #64748b; font-size: 11px;")
         layout.addWidget(self.label_overall_status)
 
-        layout.addSpacing(4)
+        layout.addSpacing(6)
 
         # 2. Active Chapter / Batch Progress
         batch_header = QHBoxLayout()
         batch_title = QLabel("<b>Progres Bab Aktif:</b>")
         self.label_batch_percent = QLabel("0%")
-        self.label_batch_percent.setStyleSheet("font-weight: bold; color: #10b981;")
+        self.label_batch_percent.setStyleSheet("font-weight: bold; color: #10b981; font-size: 13px;")
         batch_header.addWidget(batch_title)
         batch_header.addStretch()
         batch_header.addWidget(self.label_batch_percent)
@@ -397,6 +400,7 @@ class TabTranslate(QWidget):
         self.progress_batch.setObjectName("chapterProgress")
         self.progress_batch.setRange(0, 100)
         self.progress_batch.setValue(0)
+        self.progress_batch.setMinimumHeight(22)
         self.progress_batch.setTextVisible(True)
         layout.addWidget(self.progress_batch)
 
@@ -409,13 +413,14 @@ class TabTranslate(QWidget):
     def _create_log_console_panel(self) -> QGroupBox:
         """Create the real-time live log console."""
         group = QGroupBox("Log Konsol Real-time")
+        group.setMinimumHeight(200)
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
 
         # Header with actions
         header = QHBoxLayout()
-        header.addWidget(QLabel("Aktivitas Penerjemahan:"))
+        header.addWidget(QLabel("<b>Aktivitas Penerjemahan:</b>"))
         header.addStretch()
 
         self.btn_copy_log = QPushButton("Salin Log")
@@ -433,6 +438,7 @@ class TabTranslate(QWidget):
         # Console Text Box
         self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
+        self.log_console.setMinimumHeight(140)
         self.log_console.setMaximumBlockCount(3000)
         self.log_console.setPlaceholderText("Log aktivitas penerjemahan akan ditampilkan di sini...")
         layout.addWidget(self.log_console)

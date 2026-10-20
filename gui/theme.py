@@ -307,6 +307,18 @@ QStatusBar QLabel {
 }
 
 /* ==========================================================================
+   QScrollArea
+   ========================================================================== */
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+
+/* ==========================================================================
    QScrollBar (Sleek modern scrollbar)
    ========================================================================== */
 QScrollBar:vertical {

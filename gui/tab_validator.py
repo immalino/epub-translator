@@ -117,8 +117,21 @@ class TabValidator(QWidget):
 
     def _setup_ui(self) -> None:
         """Construct the validation dashboard."""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(14, 12, 14, 12)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("tabValidatorScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_widget.setObjectName("tabValidatorContent")
+        main_layout = QVBoxLayout(content_widget)
+        main_layout.setContentsMargins(14, 14, 14, 14)
         main_layout.setSpacing(12)
 
         # ---------------------------------------------------------------------
@@ -242,10 +255,14 @@ class TabValidator(QWidget):
         self.log_details = QPlainTextEdit()
         self.log_details.setReadOnly(True)
         self.log_details.setPlaceholderText("Hasil detail pemeriksaan akan ditampilkan di sini...")
+        self.log_details.setMinimumHeight(140)
         self.log_details.setStyleSheet("font-family: monospace; font-size: 12px;")
         l_layout.addWidget(self.log_details)
 
         main_layout.addWidget(log_group, stretch=1)
+
+        self.scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(self.scroll_area)
 
     # =========================================================================
     # Path Controls

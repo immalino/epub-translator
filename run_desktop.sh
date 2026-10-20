@@ -13,3 +13,4 @@ else
     echo "Error: Python 3 not found. Please activate your virtual environment or install python3."
     exit 1
 fi
+

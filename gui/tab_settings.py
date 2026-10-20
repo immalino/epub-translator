@@ -67,9 +67,22 @@ class TabSettings(QWidget):
 
     def _setup_ui(self) -> None:
         """Construct the settings interface."""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(14, 12, 14, 12)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("tabSettingsScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_widget.setObjectName("tabSettingsContent")
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
 
         # ---------------------------------------------------------------------
         # 1. Provider Selection
@@ -313,6 +326,9 @@ class TabSettings(QWidget):
         bottom_bar.addWidget(self.btn_save)
 
         layout.addLayout(bottom_bar)
+
+        self.scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(self.scroll_area)
 
     # =========================================================================
     # Provider Toggling
