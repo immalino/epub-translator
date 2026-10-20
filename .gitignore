@@ -32,8 +32,9 @@ ENV/
 .epub_translate_cache/
 *.log
 
-# Environment variables
+# Environment variables & local configuration
 .env
+config.json
 
 # Ebook files & directories
 *.epub

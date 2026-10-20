@@ -1,11 +1,11 @@
-"""Calibre-inspired Modern Stylesheet and Theme Configuration.
+"""Calibre-inspired Modern Stylesheet and Typography Configuration.
 
-Provides a clean, functional desktop styling inspired by Calibre e-book manager:
-- Prominent toolbar with generous button targets and clear icon/text layout
+Provides a clean, functional desktop styling inspired by modern Calibre e-book manager:
 - High-contrast, clean QTabWidget tabs
 - Polished, neatly striped QTableWidget
 - Smooth, high-contrast modern progress bars
 - Subtle, clean QStatusBar with status badges
+- Native OS font selection (Segoe UI, Ubuntu, Inter, DejaVu Sans)
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 logger = logging.getLogger("epub_translate.gui.theme")
@@ -21,143 +21,157 @@ logger = logging.getLogger("epub_translate.gui.theme")
 # Calibre Modern QSS Stylesheet
 CALIBRE_QSS = """
 /* ==========================================================================
-   Base Window & Font
+   Base Window & Surfaces
    ========================================================================== */
-QWidget {
+QMainWindow, QDialog {
     background-color: #f8fafc;
-    color: #1e293b;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px;
-    selection-background-color: #2b5797;
-    selection-color: #ffffff;
+    color: #0f172a;
 }
 
-QMainWindow {
-    background-color: #f1f5f9;
+/* Default label & text colors */
+QLabel {
+    color: #1e293b;
+    background-color: transparent;
 }
 
 /* ==========================================================================
    Calibre Top Action Toolbar
    ========================================================================== */
 QToolBar {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f1f5f9);
-    border-bottom: 1px solid #cbd5e1;
+    background-color: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
     padding: 6px 10px;
-    spacing: 6px;
+    spacing: 8px;
 }
 
 QToolBar::separator {
     width: 1px;
-    background-color: #cbd5e1;
-    margin: 4px 8px;
+    background-color: #e2e8f0;
+    margin: 4px 6px;
 }
 
 QToolButton {
     background-color: transparent;
-    color: #1e293b;
+    color: #334155;
     border: 1px solid transparent;
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 6px 12px;
     font-weight: 500;
-    min-width: 68px;
+    font-size: 11px;
+    min-width: 64px;
 }
 
 QToolButton:hover {
-    background-color: #e2e8f0;
+    background-color: #f1f5f9;
+    color: #0284c7;
     border: 1px solid #cbd5e1;
 }
 
 QToolButton:pressed {
-    background-color: #cbd5e1;
+    background-color: #e2e8f0;
     border: 1px solid #94a3b8;
 }
 
 QToolButton:disabled {
-    color: #94a3b8;
+    color: #cbd5e1;
 }
 
 /* ==========================================================================
-   QTabWidget (Calibre Navigation Tabs)
+   QTabWidget (Modern Calibre Navigation Tabs)
    ========================================================================== */
 QTabWidget::pane {
-    border: 1px solid #cbd5e1;
+    border: 1px solid #e2e8f0;
     background-color: #ffffff;
     top: -1px;
-    border-radius: 4px;
+    border-radius: 6px;
 }
 
 QTabBar::tab {
-    background: #e2e8f0;
-    color: #475569;
-    border: 1px solid #cbd5e1;
-    border-bottom-color: #cbd5e1;
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
-    padding: 8px 18px;
-    margin-right: 3px;
+    padding: 9px 20px;
+    margin-right: 4px;
     font-weight: 600;
+    font-size: 12px;
 }
 
 QTabBar::tab:hover {
-    background: #f1f5f9;
+    background: #ffffff;
     color: #0f172a;
 }
 
 QTabBar::tab:selected {
     background: #ffffff;
-    color: #2b5797;
-    border-bottom: 2px solid #2b5797;
-    border-top: 2px solid #2b5797;
+    color: #0284c7;
+    border-top: 3px solid #0284c7;
+    border-bottom: 1px solid #ffffff;
 }
 
 /* ==========================================================================
-   QTableWidget & QTableView (Neat, clean borders & alternating rows)
+   QTableWidget & QTableView (Clean borders & alternating rows)
    ========================================================================== */
 QTableWidget, QTableView {
     background-color: #ffffff;
-    alternate-background-color: #f8fafc;
-    border: 1px solid #cbd5e1;
-    border-radius: 4px;
-    gridline-color: #e2e8f0;
+    alternate-background-color: #fcfdfd;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    gridline-color: #f1f5f9;
     selection-background-color: #e0f2fe;
     selection-color: #0369a1;
 }
 
-QHeaderView::section {
-    background-color: #f1f5f9;
-    color: #334155;
-    padding: 6px 8px;
+QTableWidget::item {
+    padding: 4px 6px;
     border: none;
-    border-right: 1px solid #cbd5e1;
-    border-bottom: 1px solid #cbd5e1;
+}
+
+QTableWidget::item:focus {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+
+QHeaderView::section {
+    background-color: #f8fafc;
+    color: #475569;
+    padding: 7px 10px;
+    border: none;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
     font-weight: 600;
+    font-size: 12px;
 }
 
 QHeaderView::section:hover {
-    background-color: #e2e8f0;
+    background-color: #f1f5f9;
+    color: #0f172a;
 }
 
 /* ==========================================================================
-   QProgressBar (Modern, high contrast)
+   QProgressBar (Modern, high contrast gradient)
    ========================================================================== */
 QProgressBar {
-    background-color: #e2e8f0;
-    border: 1px solid #cbd5e1;
+    background-color: #f1f5f9;
+    border: 1px solid #e2e8f0;
     border-radius: 6px;
     text-align: center;
     color: #0f172a;
     font-weight: 600;
-    min-height: 20px;
+    font-size: 11px;
+    min-height: 18px;
 }
 
 QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #0ea5e9);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
     border-radius: 5px;
 }
 
-/* Secondary / Chapter progress bar variant via object name */
 QProgressBar#chapterProgress::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981, stop:1 #34d399);
+    border-radius: 5px;
 }
 
 /* ==========================================================================
@@ -167,41 +181,43 @@ QPushButton {
     background-color: #ffffff;
     color: #334155;
     border: 1px solid #cbd5e1;
-    border-radius: 5px;
+    border-radius: 6px;
     padding: 6px 14px;
     font-weight: 500;
+    font-size: 12px;
     min-height: 20px;
 }
 
 QPushButton:hover {
-    background-color: #f1f5f9;
+    background-color: #f8fafc;
     border-color: #94a3b8;
     color: #0f172a;
 }
 
 QPushButton:pressed {
-    background-color: #e2e8f0;
+    background-color: #f1f5f9;
+    border-color: #64748b;
 }
 
 QPushButton:disabled {
     background-color: #f8fafc;
-    color: #94a3b8;
+    color: #cbd5e1;
     border-color: #e2e8f0;
 }
 
 QPushButton#primaryButton {
-    background-color: #2b5797;
+    background-color: #0284c7;
     color: #ffffff;
-    border: 1px solid #1e3e6b;
+    border: 1px solid #0369a1;
     font-weight: 600;
 }
 
 QPushButton#primaryButton:hover {
-    background-color: #1e3e6b;
+    background-color: #0369a1;
 }
 
 QPushButton#primaryButton:pressed {
-    background-color: #162d4e;
+    background-color: #075985;
 }
 
 /* ==========================================================================
@@ -210,80 +226,99 @@ QPushButton#primaryButton:pressed {
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
-    border-radius: 5px;
+    border-radius: 6px;
     padding: 5px 8px;
     color: #0f172a;
     min-height: 22px;
+    font-size: 12px;
 }
 
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-    border: 1px solid #2b5797;
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 1.5px solid #0284c7;
     background-color: #ffffff;
 }
 
 QComboBox::drop-down {
     border: none;
-    width: 22px;
+    width: 20px;
 }
 
 QPlainTextEdit, QTextEdit {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
-    border-radius: 4px;
+    border-radius: 6px;
     color: #0f172a;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 12px;
+    padding: 6px;
 }
 
 /* ==========================================================================
-   QGroupBox
+   QGroupBox (Modern Card style)
    ========================================================================== */
 QGroupBox {
     font-weight: 600;
-    color: #1e293b;
+    font-size: 13px;
+    color: #0f172a;
     border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    margin-top: 12px;
-    padding: 14px 10px 10px 10px;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding: 16px 12px 12px 12px;
     background-color: #ffffff;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 12px;
-    padding: 0 4px;
+    left: 14px;
+    padding: 0 6px;
     background-color: #ffffff;
+    color: #0f172a;
+}
+
+/* ==========================================================================
+   QRadioButton & QCheckBox
+   ========================================================================== */
+QRadioButton, QCheckBox {
+    color: #1e293b;
+    font-size: 12px;
+    spacing: 6px;
+    background-color: transparent;
+}
+
+QRadioButton::indicator, QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
 }
 
 /* ==========================================================================
    QStatusBar
    ========================================================================== */
 QStatusBar {
-    background-color: #f1f5f9;
-    border-top: 1px solid #cbd5e1;
-    color: #475569;
-    padding: 2px 8px;
+    background-color: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    color: #64748b;
+    padding: 3px 10px;
 }
 
 QStatusBar QLabel {
     color: #475569;
+    font-size: 12px;
 }
 
 /* ==========================================================================
-   QScrollBar
+   QScrollBar (Sleek modern scrollbar)
    ========================================================================== */
 QScrollBar:vertical {
-    background: #f1f5f9;
-    width: 12px;
+    background: #f8fafc;
+    width: 10px;
     margin: 0px;
-    border-radius: 6px;
 }
 
 QScrollBar::handle:vertical {
     background: #cbd5e1;
     min-height: 24px;
-    border-radius: 6px;
+    border-radius: 5px;
     margin: 2px;
 }
 
@@ -296,16 +331,15 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 
 QScrollBar:horizontal {
-    background: #f1f5f9;
-    height: 12px;
+    background: #f8fafc;
+    height: 10px;
     margin: 0px;
-    border-radius: 6px;
 }
 
 QScrollBar::handle:horizontal {
     background: #cbd5e1;
     min-width: 24px;
-    border-radius: 6px;
+    border-radius: 5px;
     margin: 2px;
 }
 
@@ -320,17 +354,37 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 
 
 def apply_calibre_theme(app: QApplication) -> None:
-    """Apply the Calibre stylesheet and typography settings to the QApplication."""
+    """Apply the Calibre stylesheet and clean typography settings to the QApplication."""
     if not app:
         logger.warning("apply_calibre_theme called without QApplication instance.")
         return
 
-    # Set default clean system font
-    default_font = QFont("-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif")
+    # Select the cleanest available system sans-serif font
+    preferred_fonts = [
+        "Segoe UI",
+        "Ubuntu",
+        "Inter",
+        "Roboto",
+        "DejaVu Sans",
+        "Helvetica Neue",
+        "Arial",
+    ]
+    available = set(QFontDatabase.families())
+    chosen_family = None
+    for cand in preferred_fonts:
+        if cand in available:
+            chosen_family = cand
+            break
+
+    if chosen_family:
+        default_font = QFont(chosen_family)
+    else:
+        default_font = QFont()
+        default_font.setStyleHint(QFont.SansSerif)
+
     default_font.setPointSize(10)
     app.setFont(default_font)
 
     # Apply stylesheet
     app.setStyleSheet(CALIBRE_QSS)
-    logger.info("Calibre theme successfully applied to QApplication.")
-
+    logger.info("Calibre modern theme successfully applied to QApplication.")

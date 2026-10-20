@@ -68,3 +68,4 @@ echo Aplikasi standalone siap dijalankan di:
 echo dist\EPUBTranslator\EPUBTranslator.exe
 echo.
 pause
+

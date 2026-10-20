@@ -1,0 +1,18 @@
+{
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "api_keys": [],
+  "batch_size": 20,
+  "max_batch_chars": 3500,
+  "source_lang": "en",
+  "target_lang": "id",
+  "style": "natural",
+  "request_timeout": 60.0,
+  "max_retries": 5,
+  "key_cooldown_seconds": 60.0,
+  "rotate_strategy": "round_robin",
+  "ollama_base_url": "http://localhost:11434",
+  "input_dir": "input",
+  "output_dir": "output",
+  "checkpoint_dir": ".epub_translate_cache"
+}

@@ -106,11 +106,16 @@ class TabSettings(QWidget):
         self.btn_add_key.clicked.connect(self._on_add_key_clicked)
         keys_bar.addWidget(self.btn_add_key)
 
-        self.btn_remove_key = QPushButton("➖ Hapus Kunci Terpilih")
+        self.btn_paste_keys = QPushButton("📋 Tempel dari Clipboard")
+        self.btn_paste_keys.setToolTip("Tempel satu atau banyak API Key dari clipboard (otomatis dipisah)")
+        self.btn_paste_keys.clicked.connect(self.paste_keys_from_clipboard)
+        keys_bar.addWidget(self.btn_paste_keys)
+
+        self.btn_remove_key = QPushButton("➖ Hapus Terpilih")
         self.btn_remove_key.clicked.connect(self._on_remove_key_clicked)
         keys_bar.addWidget(self.btn_remove_key)
 
-        self.btn_toggle_mask = QPushButton("👁️ Sembunyikan / Tampilkan")
+        self.btn_toggle_mask = QPushButton("👁️ Sensor")
         self.btn_toggle_mask.clicked.connect(self._toggle_key_masking)
         keys_bar.addWidget(self.btn_toggle_mask)
 
@@ -294,14 +299,14 @@ class TabSettings(QWidget):
         bottom_bar = QHBoxLayout()
         bottom_bar.addStretch()
 
-        self.btn_reload = QPushButton("Muat Ulang dari .env")
+        self.btn_reload = QPushButton("Muat Ulang Pengaturan")
         self.btn_reload.clicked.connect(lambda: self.load_config(Config.load()))
         bottom_bar.addWidget(self.btn_reload)
 
-        self.btn_save = QPushButton("💾 Simpan Pengaturan ke .env")
+        self.btn_save = QPushButton("💾 Simpan Pengaturan")
         self.btn_save.setStyleSheet(
             "QPushButton { background-color: #0284c7; color: white; font-weight: bold; "
-            "padding: 8px 18px; border-radius: 4px; font-size: 13px; } "
+            "padding: 8px 20px; border-radius: 6px; font-size: 13px; } "
             "QPushButton:hover { background-color: #0369a1; }"
         )
         self.btn_save.clicked.connect(self.save_settings)
@@ -376,6 +381,40 @@ class TabSettings(QWidget):
             item = self.table_keys.item(r, 0)
             if item:
                 item.setText(str(r + 1))
+
+    def paste_keys_from_clipboard(self) -> int:
+        """Paste API keys directly from system clipboard, splitting on newlines/commas/spaces."""
+        clipboard = QApplication.clipboard()
+        text = clipboard.text() if clipboard else ""
+        if not text.strip():
+            QMessageBox.information(self, "Clipboard Kosong", "Tidak ada teks API Key di clipboard.")
+            return 0
+
+        # Split on newline, comma, semicolon, space, or quotes
+        import re
+        tokens = [k.strip().strip("'\"`") for k in re.split(r"[\r\n,;\s]+", text) if k.strip()]
+        existing = set(self.get_api_keys())
+        added_count = 0
+
+        for token in tokens:
+            if token and token not in existing:
+                self.add_key_row(token, status="Siap")
+                existing.add(token)
+                added_count += 1
+
+        if added_count > 0:
+            QMessageBox.information(
+                self,
+                "Kunci Ditambahkan",
+                f"Berhasil menambahkan {added_count} API Key dari clipboard."
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Informasi",
+                "Semua API Key dari clipboard sudah ada di dalam tabel."
+            )
+        return added_count
 
     def _toggle_key_masking(self) -> None:
         """Toggle displaying full key or masked key summary in table."""
@@ -577,10 +616,17 @@ class TabSettings(QWidget):
         return cfg
 
     def save_settings(self, env_path: Path = Path(".env"), quiet: bool = False) -> bool:
-        """Persist current settings to .env file and environment."""
+        """Persist current settings directly to config.json, environment variables, and .env fallback."""
         cfg = self.get_config()
 
-        # Update environment variables
+        # 1. Direct persistence to config.json
+        json_path = env_path.parent / "config.json" if env_path.parent.is_dir() and env_path.name != ".env" else Path("config.json")
+        try:
+            cfg.save(json_path)
+        except Exception as exc:
+            logger.warning("Gagal menyimpan config.json: %s", exc)
+
+        # 2. Update environment variables
         os.environ["TRANSLATION_PROVIDER"] = cfg.provider
         if cfg.provider == "gemini":
             os.environ["GEMINI_MODEL"] = cfg.model
@@ -596,10 +642,11 @@ class TabSettings(QWidget):
         os.environ["MAX_RETRIES"] = str(cfg.max_retries)
         os.environ["OUTPUT_DIR"] = str(cfg.output_dir)
 
-        # Write formatted .env
+        # 3. Write formatted .env for backward compatibility
         env_content = [
             "# =======================================================",
             "# EPUB TRANSLATOR CONFIGURATION (.env)",
+            "# (Dihasilkan secara otomatis dari GUI Pengaturan)",
             "# =======================================================",
             "",
             f"TRANSLATION_PROVIDER={cfg.provider}",
@@ -626,18 +673,19 @@ class TabSettings(QWidget):
             with open(env_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(env_content))
 
-            logger.info("Configuration successfully written to %s", env_path)
+            logger.info("Configuration successfully written to %s and %s", env_path, json_path)
             self.sig_config_saved.emit(cfg)
 
             if not quiet:
                 QMessageBox.information(
                     self,
-                    "Pengaturan Tersimpan",
-                    f"Pengaturan berhasil disimpan ke file:\n{env_path.resolve()}",
+                    "Pengaturan Berhasil Disimpan",
+                    "Pengaturan berhasil disimpan dan langsung diterapkan!\n"
+                    "Anda tidak perlu lagi mengedit file .env secara manual.",
                 )
             return True
         except Exception as exc:
-            logger.exception("Gagal menyimpan ke %s: %s", env_path, exc)
+            logger.exception("Gagal menyimpan konfigurasi: %s", exc)
             if not quiet:
-                QMessageBox.critical(self, "Gagal Menyimpan", f"Gagal menulis file .env:\n{exc}")
+                QMessageBox.critical(self, "Gagal Menyimpan", f"Gagal menyimpan konfigurasi:\n{exc}")
             return False

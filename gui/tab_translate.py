@@ -162,6 +162,7 @@ class TabTranslate(QWidget):
     sig_book_loaded = Signal(dict)
     sig_open_epub_requested = Signal()
     sig_dry_run_requested = Signal()
+    sig_open_settings_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -245,6 +246,9 @@ class TabTranslate(QWidget):
         self.label_summary = QLabel("Total: 0 Bab • 0 Segmen • 0 Karakter")
         self.label_summary.setStyleSheet("color: #0369a1; font-weight: 500; font-size: 12px;")
 
+        self.label_engine_summary = QLabel()
+        self.label_engine_summary.setStyleSheet("color: #059669; font-weight: 500; font-size: 11px;")
+
         self.label_path = QLabel("Lokasi File: -")
         self.label_path.setStyleSheet("color: #64748b; font-size: 11px;")
         self.label_path.setWordWrap(True)
@@ -253,6 +257,7 @@ class TabTranslate(QWidget):
         meta_layout.addWidget(self.label_creator)
         meta_layout.addWidget(self.label_language)
         meta_layout.addWidget(self.label_summary)
+        meta_layout.addWidget(self.label_engine_summary)
         meta_layout.addWidget(self.label_path)
         meta_layout.addStretch()
 
@@ -268,13 +273,23 @@ class TabTranslate(QWidget):
         self.btn_open_epub.clicked.connect(self.sig_open_epub_requested.emit)
         actions_layout.addWidget(self.btn_open_epub)
 
-        self.btn_dry_run = QPushButton("📊 Estimasi Biaya & Kuota")
+        self.btn_dry_run = QPushButton("📊 Estimasi Kuota")
         self.btn_dry_run.setStatusTip("Hitung perkiraan token, batch, dan waktu proses")
         self.btn_dry_run.setEnabled(False)
         self.btn_dry_run.clicked.connect(self.show_dry_run_dialog)
         actions_layout.addWidget(self.btn_dry_run)
 
+        self.btn_settings = QPushButton("⚙️ Ubah Mesin / Kunci")
+        self.btn_settings.setStatusTip("Buka pengaturan untuk mengedit model AI dan API Keys secara langsung")
+        self.btn_settings.clicked.connect(self.sig_open_settings_requested.emit)
+        actions_layout.addWidget(self.btn_settings)
+
         layout.addLayout(actions_layout)
+
+        try:
+            self.update_engine_summary(Config.load())
+        except Exception:
+            pass
 
         return group
 
@@ -441,6 +456,16 @@ class TabTranslate(QWidget):
         painter.drawText(pixmap.rect(), Qt.AlignCenter, "Tanpa\nCover")
         painter.end()
         self.label_cover.setPixmap(pixmap)
+
+    def update_engine_summary(self, cfg: Config) -> None:
+        """Update active engine badge text."""
+        if not hasattr(self, "label_engine_summary") or self.label_engine_summary is None:
+            return
+        if cfg.provider == "gemini":
+            keys_info = f"{len(cfg.api_keys)} Kunci API" if cfg.api_keys else "⚠️ Belum ada Kunci API"
+            self.label_engine_summary.setText(f"🤖 Mesin: Google Gemini ({cfg.model}) • {keys_info}")
+        else:
+            self.label_engine_summary.setText(f"🤖 Mesin: Ollama ({cfg.model})")
 
     def load_epub(self, file_path: str | Path) -> None:
         """Inspect EPUB file, populate book info, cover, and chapter table."""

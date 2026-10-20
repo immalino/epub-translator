@@ -166,8 +166,48 @@ class Config:
 
         return cfg
 
-    # Convenient alias for loading configuration
-    load = from_env
+    @classmethod
+    def load(cls, **overrides) -> Config:
+        """Load configuration: prioritizes config.json, then environment variables (.env)."""
+        config_file = Path("config.json")
+        json_data = {}
+        if config_file.is_file():
+            try:
+                import json
+                with open(config_file, "r", encoding="utf-8") as f:
+                    json_data = json.load(f)
+            except Exception:
+                pass
+
+        merged = dict(json_data)
+        merged.update({k: v for k, v in overrides.items() if v is not None})
+        return cls.from_env(**merged)
+
+    def save(self, file_path: Path | str = "config.json") -> bool:
+        """Persist configuration directly to config.json."""
+        import json
+        path = Path(file_path)
+        data = {
+            "provider": self.provider,
+            "model": self.model,
+            "api_keys": self.api_keys,
+            "batch_size": self.batch_size,
+            "max_batch_chars": self.max_batch_chars,
+            "source_lang": self.source_lang,
+            "target_lang": self.target_lang,
+            "style": self.style,
+            "request_timeout": self.request_timeout,
+            "max_retries": self.max_retries,
+            "key_cooldown_seconds": self.key_cooldown_seconds,
+            "rotate_strategy": self.rotate_strategy,
+            "ollama_base_url": self.ollama_base_url,
+            "input_dir": str(self.input_dir),
+            "output_dir": str(self.output_dir),
+            "checkpoint_dir": str(self.checkpoint_dir),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
 
     def masked_keys_summary(self) -> str:
         """Return a safe summary of available API keys."""

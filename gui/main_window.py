@@ -155,6 +155,9 @@ class MainWindow(QMainWindow):
         self.tab_translate = TabTranslate(parent=self)
         self.tab_translate.sig_open_epub_requested.connect(self._on_open_epub)
         self.tab_translate.sig_dry_run_requested.connect(self._on_dry_run)
+        self.tab_translate.sig_open_settings_requested.connect(
+            lambda: self.tab_widget.setCurrentWidget(self.tab_settings)
+        )
         self.tab_translate.sig_book_loaded.connect(self._on_book_loaded)
         self.tab_widget.addTab(self.tab_translate, assets.get_open_epub_icon(), "Penerjemahan")
 
@@ -201,13 +204,14 @@ class MainWindow(QMainWindow):
         status_bar.showMessage("Siap")
 
     def _on_config_saved(self, config: Config) -> None:
-        """Update status bar when settings are saved."""
+        """Update status bar and tab views when settings are saved."""
         if config.provider == "gemini":
             keys_info = f"{len(config.api_keys)} Kunci" if config.api_keys else "Tanpa Kunci"
             self.status_engine_label.setText(f"Mesin: {config.model} | API Keys: {keys_info}")
         else:
             self.status_engine_label.setText(f"Mesin: {config.model} (Ollama)")
-        self.statusBar().showMessage("Pengaturan berhasil diperbarui.", 3000)
+        self.tab_translate.update_engine_summary(config)
+        self.statusBar().showMessage("Pengaturan berhasil diperbarui dan diterapkan.", 3000)
 
     # =========================================================================
     # Toolbar Action Handlers & EPUB Management
