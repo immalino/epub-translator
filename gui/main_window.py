@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 
 from config import Config
 from gui import assets
+from gui.tab_bilingual import TabBilingual
+from gui.tab_glossary import TabGlossary
 from gui.tab_translate import TabTranslate
 from gui.worker import TranslationWorker
 
@@ -143,20 +145,16 @@ class MainWindow(QMainWindow):
         self.tab_translate = TabTranslate(parent=self)
         self.tab_translate.sig_open_epub_requested.connect(self._on_open_epub)
         self.tab_translate.sig_dry_run_requested.connect(self._on_dry_run)
+        self.tab_translate.sig_book_loaded.connect(self._on_book_loaded)
         self.tab_widget.addTab(self.tab_translate, assets.get_open_epub_icon(), "Penerjemahan")
 
         # Tab 2: Editor Bilingual (Advanced Mode)
-        self.tab_editor = PlaceholderTab(
-            "Editor Bilingual (Calibre Advanced Mode)",
-            "Tinjau dan perbaiki teks terjemahan berdampingan dengan teks asli sebelum finalisasi.",
-        )
-        self.tab_widget.addTab(self.tab_editor, assets.get_editor_icon(), "Editor Bilingual")
+        self.tab_bilingual = TabBilingual(parent=self)
+        self.tab_editor = self.tab_bilingual  # Alias for backward compatibility
+        self.tab_widget.addTab(self.tab_bilingual, assets.get_editor_icon(), "Editor Bilingual")
 
         # Tab 3: Glosarium Istilah
-        self.tab_glossary = PlaceholderTab(
-            "Glosarium Istilah & Karakter",
-            "Kelola padanan kata khusus, nama tokoh, dan terminologi novel konsisten.",
-        )
+        self.tab_glossary = TabGlossary(parent=self)
         self.tab_widget.addTab(self.tab_glossary, assets.get_glossary_icon(), "Glosarium")
 
         # Tab 4: Pengaturan Mesin & API
@@ -200,6 +198,7 @@ class MainWindow(QMainWindow):
         try:
             self.current_epub_path = epub_path
             self.tab_translate.load_epub(epub_path)
+            self.tab_bilingual.load_book(epub_path, self.tab_translate.current_book_info)
             self.setWindowTitle(f"EPUB Translator - {epub_path.name}")
             self.statusBar().showMessage(f"EPUB berhasil dimuat: {epub_path.name}", 4000)
             self.action_start.setEnabled(True)
@@ -207,6 +206,11 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             logger.exception("Gagal membuka EPUB: %s", exc)
             QMessageBox.critical(self, "Kesalahan EPUB", f"Gagal membaca file EPUB:\n{exc}")
+
+    def _on_book_loaded(self, info: dict) -> None:
+        """Propagate loaded book information to dependent tabs."""
+        if self.current_epub_path:
+            self.tab_bilingual.load_book(self.current_epub_path, book_info=info)
 
     def _on_open_epub(self) -> None:
         """Handler for Open EPUB action."""
@@ -250,12 +254,16 @@ class MainWindow(QMainWindow):
         output_file = self.output_directory / f"{stem}_id.epub"
 
         config = Config.load()
+        glossary = self.tab_glossary.get_glossary()
+        glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
+        self.tab_bilingual.glossary = glossary_to_pass
 
         logger.info(
-            "Starting translation worker for %s -> %s (filter=%s)",
+            "Starting translation worker for %s -> %s (filter=%s, glossary_terms=%d)",
             self.current_epub_path,
             output_file,
             filter_str,
+            len(glossary_to_pass.terms) if glossary_to_pass else 0,
         )
         self.worker = TranslationWorker(
             input_path=self.current_epub_path,
@@ -264,7 +272,7 @@ class MainWindow(QMainWindow):
             chapter_filter=filter_str,
             resume=True,
             retry_failed=False,
-            glossary=None,
+            glossary=glossary_to_pass,
             parent=self,
         )
 
@@ -333,6 +341,9 @@ class MainWindow(QMainWindow):
             return
 
         config = Config.load()
+        glossary = self.tab_glossary.get_glossary()
+        glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
+        self.tab_translate.current_glossary = glossary_to_pass
         self.tab_translate.show_dry_run_dialog(config=config)
 
     def _on_open_output_folder(self) -> None:
