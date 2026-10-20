@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import Config
+from config import Config, get_default_output_dir
 from gui import assets
 from gui.tab_bilingual import TabBilingual
 from gui.tab_glossary import TabGlossary
@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         # Active worker reference
         self.worker: Optional[TranslationWorker] = None
         self.current_epub_path: Optional[Path] = None
-        self.output_directory: Path = Path("output")
+        self.output_directory: Path = get_default_output_dir()
 
         # UI Setup
         self._setup_toolbar()
@@ -265,70 +265,85 @@ class MainWindow(QMainWindow):
     def _on_start_translation(self) -> None:
         """Handler for Start Translation action."""
         logger.info("Toolbar action: Mulai Terjemahkan triggered.")
-        if not self.current_epub_path:
-            QMessageBox.information(
-                self,
-                "Pilih Buku EPUB",
-                "Silakan buka file EPUB terlebih dahulu sebelum memulai penerjemahan.",
+        try:
+            if not self.current_epub_path:
+                QMessageBox.information(
+                    self,
+                    "Pilih Buku EPUB",
+                    "Silakan buka file EPUB terlebih dahulu sebelum memulai penerjemahan.",
+                )
+                return
+
+            filter_str = self.tab_translate.get_selected_chapters_filter()
+            if filter_str == "":
+                QMessageBox.warning(
+                    self,
+                    "Pilih Bab",
+                    "Tidak ada bab yang dipilih. Silakan centang minimal satu bab pada tabel.",
+                )
+                return
+
+            config = self.tab_settings.get_config()
+            target_out = Path(config.output_dir)
+            try:
+                target_out.mkdir(parents=True, exist_ok=True)
+                self.output_directory = target_out
+            except (PermissionError, OSError):
+                self.output_directory = get_default_output_dir()
+                self.output_directory.mkdir(parents=True, exist_ok=True)
+
+            stem = self.current_epub_path.stem
+            output_file = self.output_directory / f"{stem}_id.epub"
+
+            glossary = self.tab_glossary.get_glossary()
+            glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
+            self.tab_bilingual.glossary = glossary_to_pass
+
+            logger.info(
+                "Starting translation worker for %s -> %s (filter=%s, glossary_terms=%d)",
+                self.current_epub_path,
+                output_file,
+                filter_str,
+                len(glossary_to_pass.terms) if glossary_to_pass else 0,
             )
-            return
-
-        filter_str = self.tab_translate.get_selected_chapters_filter()
-        if filter_str == "":
-            QMessageBox.warning(
-                self,
-                "Pilih Bab",
-                "Tidak ada bab yang dipilih. Silakan centang minimal satu bab pada tabel.",
+            self.worker = TranslationWorker(
+                input_path=self.current_epub_path,
+                output_path=output_file,
+                config=config,
+                chapter_filter=filter_str,
+                resume=True,
+                retry_failed=False,
+                glossary=glossary_to_pass,
+                parent=self,
             )
-            return
 
-        self.output_directory.mkdir(parents=True, exist_ok=True)
-        stem = self.current_epub_path.stem
-        output_file = self.output_directory / f"{stem}_id.epub"
+            # Connect signals
+            self.worker.sig_log.connect(self.tab_translate.append_log)
+            self.worker.sig_overall_progress.connect(self.tab_translate.update_overall_progress)
+            self.worker.sig_batch_progress.connect(self.tab_translate.update_batch_progress)
+            self.worker.sig_chapter_status.connect(self.tab_translate.update_chapter_status)
+            self.worker.sig_quota_warning.connect(self._on_quota_warning)
+            self.worker.sig_completed.connect(self._on_translation_completed)
+            self.worker.sig_error.connect(self._on_translation_error)
+            self.worker.finished.connect(self._on_worker_finished)
 
-        config = self.tab_settings.get_config()
-        glossary = self.tab_glossary.get_glossary()
-        glossary_to_pass = glossary if (len(glossary) > 0 or glossary.notes) else None
-        self.tab_bilingual.glossary = glossary_to_pass
+            # Toolbar UI State
+            self.action_start.setEnabled(False)
+            self.action_pause.setEnabled(True)
+            self.action_pause.setText("Jeda")
+            self.action_stop.setEnabled(True)
+            self.action_open.setEnabled(False)
+            self.action_dry_run.setEnabled(False)
 
-        logger.info(
-            "Starting translation worker for %s -> %s (filter=%s, glossary_terms=%d)",
-            self.current_epub_path,
-            output_file,
-            filter_str,
-            len(glossary_to_pass.terms) if glossary_to_pass else 0,
-        )
-        self.worker = TranslationWorker(
-            input_path=self.current_epub_path,
-            output_path=output_file,
-            config=config,
-            chapter_filter=filter_str,
-            resume=True,
-            retry_failed=False,
-            glossary=glossary_to_pass,
-            parent=self,
-        )
-
-        # Connect signals
-        self.worker.sig_log.connect(self.tab_translate.append_log)
-        self.worker.sig_overall_progress.connect(self.tab_translate.update_overall_progress)
-        self.worker.sig_batch_progress.connect(self.tab_translate.update_batch_progress)
-        self.worker.sig_chapter_status.connect(self.tab_translate.update_chapter_status)
-        self.worker.sig_quota_warning.connect(self._on_quota_warning)
-        self.worker.sig_completed.connect(self._on_translation_completed)
-        self.worker.sig_error.connect(self._on_translation_error)
-        self.worker.finished.connect(self._on_worker_finished)
-
-        # Toolbar UI State
-        self.action_start.setEnabled(False)
-        self.action_pause.setEnabled(True)
-        self.action_pause.setText("Jeda")
-        self.action_stop.setEnabled(True)
-        self.action_open.setEnabled(False)
-        self.action_dry_run.setEnabled(False)
-
-        self.statusBar().showMessage(f"Menerjemahkan: {self.current_epub_path.name}...")
-        self.worker.start()
+            self.statusBar().showMessage(f"Menerjemahkan: {self.current_epub_path.name}...")
+            self.worker.start()
+        except Exception as exc:
+            logger.exception("Error saat memulai penerjemahan: %s", exc)
+            QMessageBox.critical(
+                self,
+                "Gagal Memulai Penerjemahan",
+                f"Terjadi kesalahan saat memulai penerjemahan:\n{exc}",
+            )
 
     def _on_pause_resume(self) -> None:
         """Handler for Pause / Resume action."""
@@ -381,8 +396,14 @@ class MainWindow(QMainWindow):
 
     def _on_open_output_folder(self) -> None:
         """Open output directory in OS file manager."""
-        folder = self.output_directory.resolve()
-        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_directory.mkdir(parents=True, exist_ok=True)
+            folder = self.output_directory.resolve()
+        except (PermissionError, OSError):
+            self.output_directory = get_default_output_dir()
+            self.output_directory.mkdir(parents=True, exist_ok=True)
+            folder = self.output_directory.resolve()
+
         logger.info("Opening output directory: %s", folder)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         self.statusBar().showMessage(f"Membuka folder output: {folder.name}", 3000)

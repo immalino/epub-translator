@@ -56,7 +56,12 @@ class CheckpointManager:
         self.model = model
         self.glossary_hash = glossary_hash
         self.checkpoint_dir = Path(checkpoint_dir)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            from config import get_default_checkpoint_dir
+            self.checkpoint_dir = get_default_checkpoint_dir()
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         self.session_id = f"{epub_hash}_{model}_{glossary_hash}"
         self.file_path = self.checkpoint_dir / f"{self.session_id}.json"

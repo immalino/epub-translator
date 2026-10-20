@@ -393,7 +393,11 @@ class TranslationRunner:
 
         cb.on_start(len(target_spine), total_chars_count, total_segments_count, target_spine)
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as exc:
+            cb.on_log("ERROR", f"Gagal membuat direktori output '{output_path.parent}': {exc}")
+            return 1
 
         # Checkpoint init
         epub_hash = CheckpointManager.compute_file_hash(input_path)

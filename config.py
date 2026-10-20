@@ -19,32 +19,85 @@ if not getattr(sys, "frozen", False):
     load_dotenv()
 
 
+def is_directory_writable(dir_path: Path | str) -> bool:
+    """Test if a directory is writable by attempting to create a temporary test file."""
+    try:
+        p = Path(dir_path)
+        p.mkdir(parents=True, exist_ok=True)
+        test_file = p / f".write_test_{os.getpid()}"
+        test_file.touch()
+        test_file.unlink()
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+def get_user_data_dir() -> Path:
+    """Get the user-writable data directory for EPUB Translator."""
+    appdata = (
+        os.getenv("LOCALAPPDATA")
+        or os.getenv("APPDATA")
+        or os.getenv("XDG_DATA_HOME")
+        or (Path.home() / ".local" / "share")
+    )
+    user_dir = Path(appdata) / "EPUBTranslator"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
+
+
+def get_user_documents_dir() -> Path:
+    """Get the user-writable documents directory for output."""
+    docs = Path.home() / "Documents" / "EPUBTranslator"
+    try:
+        docs.mkdir(parents=True, exist_ok=True)
+        return docs
+    except (PermissionError, OSError):
+        user_dir = get_user_data_dir() / "output"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir
+
+
+def get_default_checkpoint_dir() -> Path:
+    """Return default checkpoint directory, falling back to user data dir if CWD is read-only."""
+    cwd_cache = Path(".epub_translate_cache")
+    if is_directory_writable(Path.cwd()):
+        return cwd_cache
+    cache_dir = get_user_data_dir() / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def get_default_output_dir() -> Path:
+    """Return default output directory, falling back to Documents if CWD is read-only."""
+    cwd_out = Path("output")
+    if is_directory_writable(Path.cwd()):
+        return cwd_out
+    out_dir = get_user_documents_dir() / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
 def get_config_path() -> Path:
     """Return the active configuration path (config.json).
 
     If running frozen (PyInstaller executable):
-    - Checks next to the executable (portable mode).
-    - Falls back to user AppData / home directory if the executable dir is read-only.
+    - Checks next to the executable (portable mode if writable).
+    - Falls back to user AppData / home directory if the executable dir is read-only (e.g. Program Files).
     When running from source / dev:
-    - Uses config.json in the current working directory.
+    - Uses config.json in the current working directory if writable, else user data dir.
     """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
         exe_config = exe_dir / "config.json"
         if exe_config.exists():
             return exe_config
-        try:
-            test_file = exe_dir / ".write_test"
-            test_file.touch()
-            test_file.unlink()
+        if is_directory_writable(exe_dir):
             return exe_config
-        except (PermissionError, OSError):
-            appdata = os.getenv("APPDATA") or os.getenv("XDG_CONFIG_HOME") or os.path.expanduser("~")
-            cfg_dir = Path(appdata) / "EPUBTranslator"
-            cfg_dir.mkdir(parents=True, exist_ok=True)
-            return cfg_dir / "config.json"
+        return get_user_data_dir() / "config.json"
 
-    return Path("config.json")
+    if is_directory_writable(Path.cwd()):
+        return Path("config.json")
+    return get_user_data_dir() / "config.json"
 
 
 def mask_key(key: str) -> str:
@@ -105,13 +158,13 @@ class Config:
     style: str = "natural"
     request_timeout: float = 60.0
     input_dir: Path = field(default_factory=lambda: Path("input"))
-    output_dir: Path = field(default_factory=lambda: Path("output"))
+    output_dir: Path = field(default_factory=get_default_output_dir)
     ollama_base_url: str = "http://localhost:11434"
     api_keys: List[str] = field(default_factory=list)
     max_retries: int = 5
     max_retries_per_key: int = 3
     key_cooldown_seconds: float = 60.0
-    checkpoint_dir: Path = field(default_factory=lambda: Path(".epub_translate_cache"))
+    checkpoint_dir: Path = field(default_factory=get_default_checkpoint_dir)
     rotate_strategy: str = "round_robin"  # 'round_robin' or 'fallback_on_limit'
     translate_metadata: bool = False
     dry_run: bool = False
@@ -214,6 +267,24 @@ class Config:
             except Exception:
                 json_data = {}
 
+        # Resolve output_dir safely (fallback if directory is not writable)
+        raw_output = json_data.get("output_dir")
+        if raw_output:
+            out_p = Path(raw_output)
+            if not is_directory_writable(out_p if out_p.is_absolute() else Path.cwd()):
+                out_p = get_default_output_dir()
+        else:
+            out_p = get_default_output_dir()
+
+        # Resolve checkpoint_dir safely (fallback if directory is not writable)
+        raw_checkpoint = json_data.get("checkpoint_dir")
+        if raw_checkpoint:
+            cp_p = Path(raw_checkpoint)
+            if not is_directory_writable(cp_p if cp_p.is_absolute() else Path.cwd()):
+                cp_p = get_default_checkpoint_dir()
+        else:
+            cp_p = get_default_checkpoint_dir()
+
         cfg = cls(
             provider=json_data.get("provider", "gemini"),
             model=json_data.get("model", "gemini-2.5-flash"),
@@ -224,13 +295,13 @@ class Config:
             style=json_data.get("style", "natural"),
             request_timeout=float(json_data.get("request_timeout", 60.0)),
             input_dir=Path(json_data.get("input_dir", "input")),
-            output_dir=Path(json_data.get("output_dir", "output")),
+            output_dir=out_p,
             ollama_base_url=json_data.get("ollama_base_url", "http://localhost:11434"),
             api_keys=list(json_data.get("api_keys", [])),
             max_retries=int(json_data.get("max_retries", 5)),
             max_retries_per_key=int(json_data.get("max_retries_per_key", 3)),
             key_cooldown_seconds=float(json_data.get("key_cooldown_seconds", 60.0)),
-            checkpoint_dir=Path(json_data.get("checkpoint_dir", ".epub_translate_cache")),
+            checkpoint_dir=cp_p,
             rotate_strategy=json_data.get("rotate_strategy", "round_robin"),
             translate_metadata=bool(json_data.get("translate_metadata", False)),
             dry_run=bool(json_data.get("dry_run", False)),
