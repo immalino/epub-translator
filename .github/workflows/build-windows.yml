@@ -1,0 +1,64 @@
+name: Build Windows Desktop Executable
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Standalone Windows (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Test Suite
+        run: |
+          pytest tests/ -v
+
+      - name: Build Desktop Executable with PyInstaller
+        run: |
+          python build_desktop.py
+
+      - name: Set up Inno Setup
+        uses: mvnoy/setup-inno-setup@v3
+        with:
+          version: "6.3.3"
+
+      - name: Compile Inno Setup Installer
+        run: |
+          iscc installer.iss
+
+      - name: Upload Standalone App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPUBTranslator-Windows-Folder
+          path: dist/EPUBTranslator/
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPUBTranslator-Setup-Installer
+          path: dist_installer/*.exe
+          if-no-files-found: warn

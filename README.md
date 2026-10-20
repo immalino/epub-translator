@@ -115,7 +115,7 @@ GEMINI_MODEL=gemini-2.5-flash
 
 ## 🖥️ Menjalankan Web UI (Akses Mudah dari Browser & Smartphone)
 
-Aplikasi kini dilengkapi antarmuka web interaktif berbasis **Streamlit** untuk memudahkan penggunaan tanpa mengetik perintah terminal.
+Aplikasi dilengkapi antarmuka web interaktif berbasis **Streamlit** untuk memudahkan penggunaan tanpa mengetik perintah terminal.
 
 ### 1. Cara Menjalankan Web UI
 Jalankan salah satu perintah berikut di terminal:
@@ -133,11 +133,77 @@ python epub_translate.py --ui
 - **Dari Smartphone / Tablet di Jaringan Wi-Fi yang Sama:**
   Buka browser di HP/tablet Anda dan masukkan URL jaringan yang tampil di terminal (misal: `http://192.168.1.15:8501` atau IP LAN Anda).
 
-### 3. Fitur Utama Web UI
-- **Tab 1: 📚 Penerjemahan & Progres**: Drag-and-drop file EPUB, pilih model & API key, hitung estimasi biaya (*dry-run*), pantau dual progress bar & live log, serta unduh file hasil terjemahan langsung ke folder Downloads.
-- **Tab 2: 👁️ Preview Bilingual Per Bab**: Membandingkan teks asli bahasa Inggris dengan teks terjemahan bahasa Indonesia secara berdampingan untuk setiap bab.
-- **Tab 3: 📖 Glosarium Istilah**: Editor tabel interaktif untuk menambah/mengedit istilah nama karakter, lokasi, dan catatan konteks novel.
-- **Tab 4: 🛠️ Validasi EPUB**: Pemeriksaan kepatuhan standar format buku digital secara instan.
+---
+
+## 🖥️ Aplikasi Desktop Windows & Linux (Calibre Edition)
+
+Untuk pengalaman penggunaan desktop yang lebih kaya dan responsif seperti plugin Calibre, aplikasi menyediakan **Desktop GUI Native** berbasis **PySide6 (Qt6)**.
+
+```bash
+# Menjalankan aplikasi desktop langsung dari Python:
+python desktop_app.py
+```
+
+### Fitur 5 Tab Utama Desktop:
+1. **📚 Tab 1: Penerjemahan & Monitor**:
+   - Menampilkan cover art buku, judul, pengarang, dan ringkasan segmen/karakter.
+   - Tabel seleksi bab interaktif dengan checkbox dan status per bab (*real-time*).
+   - Tombol **Estimasi Biaya & Kuota (Dry Run)** untuk menghitung perkiraan token dan waktu.
+   - Dual Progress Bar (progres total buku & progres bab aktif) serta konsol log *real-time*.
+   - Dukungan tombol kontrol Calibre Toolbar: *Buka EPUB*, *Mulai Terjemah*, *Jeda / Lanjut*, dan *Stop / Batal*.
+2. **👁️ Tab 2: Editor Bilingual (Advanced Mode)**:
+   - Dropdown seleksi bab dari buku yang dimuat.
+   - Tabel perbandingan berdampingan (*side-by-side*): ID segmen, teks asli bahasa Inggris (*read-only*), dan teks terjemahan bahasa Indonesia (*editable*).
+   - Filter dan pencarian kata kunci cepat pada baris segmen.
+   - Tombol **Simpan Perubahan ke Cache** untuk memperbarui hasil edit manual langsung ke checkpoint cache sebelum finalisasi file EPUB.
+3. **📖 Tab 3: Glosarium Istilah**:
+   - Tabel istilah konsistensi novel: *Istilah Sumber*, *Terjemahan*, *Catatan Konteks*, dan *Peka Huruf Besar (Case-sensitive)*.
+   - Aksi Tambah Baris, Hapus Baris, Pencarian istilah, serta Impor & Ekspor file JSON glosarium.
+   - Sinkronisasi otomatis dengan runner terjemahan.
+4. **⚙️ Tab 4: Pengaturan Mesin & API**:
+   - Manajemen Multi-Key Gemini API (tambah, hapus, sensor bintang, dan tombol uji validitas kunci langsung ke server Google GenAI).
+   - Pilihan model Gemini (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-3.5-flash-lite`, dll).
+   - Strategi rotasi kunci: *Round-Robin* atau *Fallback on Rate Limit*.
+   - Konfigurasi server lokal **Ollama** dengan tombol cek konektivitas.
+   - Pengaturan batch size, timeout, max retries, serta tombol **Simpan Pengaturan ke .env**.
+5. **🛠️ Tab 5: Validasi Standar EPUB**:
+   - Menguji integritas file EPUB (ZIP header, mimetype uncompressed, container XML, paket metadata OPF, dan well-formedness XHTML).
+   - Integrasi Calibre CLI (`ebook-validate`) jika terpasang.
+   - Tampilan visual kartu status centang hijau / silang merah beserta konsol diagnostik.
+
+---
+
+## 📦 Packaging Standalone Windows (.exe) & Installer
+
+Aplikasi dapat dikompilasi menjadi satu folder executable standalone Windows tanpa memerlukan instalasi Python di komputer pengguna.
+
+### 1. Build Satu-Klik di Windows (Rekomendasi)
+Cukup **klik ganda (double-click)** file:
+```cmd
+build_windows.bat
+```
+Skrip ini akan otomatis menyiapkan virtual environment, memasang dependensi, menghasilkan icon aplikasi (`app_icon.ico`), dan mengompilasi file `.exe` ke folder `dist\EPUBTranslator\`.
+
+### 2. Build via Python Script
+```bash
+# Uji coba konfigurasi build (tanpa kompilasi penuh)
+python build_desktop.py --dry-run
+
+# Kompilasi aplikasi menjadi executable
+python build_desktop.py
+```
+Aplikasi yang dihasilkan berada di:
+```text
+dist/EPUBTranslator/EPUBTranslator.exe (Windows)
+dist/EPUBTranslator/EPUBTranslator     (Linux)
+```
+
+### 3. Membuat Installer Windows (Inno Setup)
+Gunakan Inno Setup Compiler untuk mengompilasi `installer.iss`:
+```cmd
+iscc installer.iss
+```
+File setup instalasi mandiri akan dibuat di folder `dist_installer\EPUBTranslator-Setup.exe` lengkap dengan opsi shortcut Desktop dan Start Menu.
 
 ---
 
