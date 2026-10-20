@@ -16,6 +16,7 @@ from typing import Optional
 from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from config import Config
 from gui import assets
+from gui.tab_translate import TabTranslate
 from gui.worker import TranslationWorker
 
 logger = logging.getLogger("epub_translate.gui.main_window")
@@ -138,10 +140,9 @@ class MainWindow(QMainWindow):
         self.tab_widget.setIconSize(QSize(18, 18))
 
         # Tab 1: Penerjemahan & Monitor
-        self.tab_translate = PlaceholderTab(
-            "Penerjemahan & Monitor",
-            "Panel monitor penerjemahan buku, pemilihan bab, dual progress bar, dan live console log.",
-        )
+        self.tab_translate = TabTranslate(parent=self)
+        self.tab_translate.sig_open_epub_requested.connect(self._on_open_epub)
+        self.tab_translate.sig_dry_run_requested.connect(self._on_dry_run)
         self.tab_widget.addTab(self.tab_translate, assets.get_open_epub_icon(), "Penerjemahan")
 
         # Tab 2: Editor Bilingual (Advanced Mode)
@@ -191,18 +192,102 @@ class MainWindow(QMainWindow):
         status_bar.showMessage("Siap")
 
     # =========================================================================
-    # Toolbar Action Handlers (Placeholders to be wired in subsequent sessions)
+    # Toolbar Action Handlers & EPUB Management
     # =========================================================================
+
+    def load_epub(self, epub_path: Path) -> None:
+        """Load and inspect EPUB file in TabTranslate."""
+        try:
+            self.current_epub_path = epub_path
+            self.tab_translate.load_epub(epub_path)
+            self.setWindowTitle(f"EPUB Translator - {epub_path.name}")
+            self.statusBar().showMessage(f"EPUB berhasil dimuat: {epub_path.name}", 4000)
+            self.action_start.setEnabled(True)
+            self.action_dry_run.setEnabled(True)
+        except Exception as exc:
+            logger.exception("Gagal membuka EPUB: %s", exc)
+            QMessageBox.critical(self, "Kesalahan EPUB", f"Gagal membaca file EPUB:\n{exc}")
 
     def _on_open_epub(self) -> None:
         """Handler for Open EPUB action."""
         logger.info("Toolbar action: Buka EPUB triggered.")
-        self.statusBar().showMessage("Membuka dialog pemilihan file EPUB...", 3000)
+        default_dir = (
+            str(self.current_epub_path.parent)
+            if self.current_epub_path and self.current_epub_path.parent.exists()
+            else str(Path.cwd())
+        )
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Pilih File EPUB",
+            default_dir,
+            "EPUB Files (*.epub);;All Files (*)",
+        )
+        if file_path:
+            self.load_epub(Path(file_path))
 
     def _on_start_translation(self) -> None:
         """Handler for Start Translation action."""
         logger.info("Toolbar action: Mulai Terjemahkan triggered.")
-        self.statusBar().showMessage("Memulai proses penerjemahan...", 3000)
+        if not self.current_epub_path:
+            QMessageBox.information(
+                self,
+                "Pilih Buku EPUB",
+                "Silakan buka file EPUB terlebih dahulu sebelum memulai penerjemahan.",
+            )
+            return
+
+        filter_str = self.tab_translate.get_selected_chapters_filter()
+        if filter_str == "":
+            QMessageBox.warning(
+                self,
+                "Pilih Bab",
+                "Tidak ada bab yang dipilih. Silakan centang minimal satu bab pada tabel.",
+            )
+            return
+
+        self.output_directory.mkdir(parents=True, exist_ok=True)
+        stem = self.current_epub_path.stem
+        output_file = self.output_directory / f"{stem}_id.epub"
+
+        config = Config.load()
+
+        logger.info(
+            "Starting translation worker for %s -> %s (filter=%s)",
+            self.current_epub_path,
+            output_file,
+            filter_str,
+        )
+        self.worker = TranslationWorker(
+            input_path=self.current_epub_path,
+            output_path=output_file,
+            config=config,
+            chapter_filter=filter_str,
+            resume=True,
+            retry_failed=False,
+            glossary=None,
+            parent=self,
+        )
+
+        # Connect signals
+        self.worker.sig_log.connect(self.tab_translate.append_log)
+        self.worker.sig_overall_progress.connect(self.tab_translate.update_overall_progress)
+        self.worker.sig_batch_progress.connect(self.tab_translate.update_batch_progress)
+        self.worker.sig_chapter_status.connect(self.tab_translate.update_chapter_status)
+        self.worker.sig_quota_warning.connect(self._on_quota_warning)
+        self.worker.sig_completed.connect(self._on_translation_completed)
+        self.worker.sig_error.connect(self._on_translation_error)
+        self.worker.finished.connect(self._on_worker_finished)
+
+        # Toolbar UI State
+        self.action_start.setEnabled(False)
+        self.action_pause.setEnabled(True)
+        self.action_pause.setText("Jeda")
+        self.action_stop.setEnabled(True)
+        self.action_open.setEnabled(False)
+        self.action_dry_run.setEnabled(False)
+
+        self.statusBar().showMessage(f"Menerjemahkan: {self.current_epub_path.name}...")
+        self.worker.start()
 
     def _on_pause_resume(self) -> None:
         """Handler for Pause / Resume action."""
@@ -213,10 +298,12 @@ class MainWindow(QMainWindow):
             self.worker.resume()
             self.action_pause.setText("Jeda")
             self.statusBar().showMessage("Penerjemahan dilanjutkan.")
+            self.tab_translate.append_log("INFO", "Proses penerjemahan dilanjutkan.")
         else:
             self.worker.pause()
             self.action_pause.setText("Lanjut")
             self.statusBar().showMessage("Penerjemahan dijeda.")
+            self.tab_translate.append_log("INFO", "Proses penerjemahan dijeda sementara.")
 
     def _on_stop_translation(self) -> None:
         """Handler for Stop action."""
@@ -224,18 +311,29 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Hentikan Penerjemahan",
-                "Apakah Anda yakin ingin membatalkan proses penerjemahan?",
+                "Apakah Anda yakin ingin membatalkan proses penerjemahan?\n"
+                "Progres yang sudah selesai tetap aman tersimpan di checkpoint.",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
                 self.worker.cancel()
                 self.statusBar().showMessage("Membatalkan penerjemahan...")
+                self.tab_translate.append_log("WARN", "Membatalkan proses penerjemahan...")
 
     def _on_dry_run(self) -> None:
         """Handler for Dry Run action."""
         logger.info("Toolbar action: Estimasi Kuota (Dry Run) triggered.")
-        self.statusBar().showMessage("Melakukan estimasi kuota...", 3000)
+        if not self.current_epub_path:
+            QMessageBox.information(
+                self,
+                "Estimasi Kuota (Dry Run)",
+                "Silakan buka file EPUB terlebih dahulu untuk melakukan estimasi kuota.",
+            )
+            return
+
+        config = Config.load()
+        self.tab_translate.show_dry_run_dialog(config=config)
 
     def _on_open_output_folder(self) -> None:
         """Open output directory in OS file manager."""
@@ -244,6 +342,47 @@ class MainWindow(QMainWindow):
         logger.info("Opening output directory: %s", folder)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         self.statusBar().showMessage(f"Membuka folder output: {folder.name}", 3000)
+
+    # =========================================================================
+    # Worker Signal Handlers
+    # =========================================================================
+
+    def _on_quota_warning(self, error_msg: str) -> None:
+        """Handle quota warning from translation worker."""
+        self.statusBar().showMessage("Peringatan kuota harian API tercapai!", 5000)
+        QMessageBox.warning(
+            self,
+            "Batas Kuota API Tercapai",
+            f"Proses terhenti karena kuota harian API habis:\n\n{error_msg}\n\n"
+            "Progres telah tersimpan di checkpoint. Anda dapat melanjutkannya kembali.",
+        )
+
+    def _on_translation_completed(self, output_path: str, elapsed: float, report: Any) -> None:
+        """Handle completion of translation task."""
+        msg = f"Penerjemahan selesai dalam {elapsed:.1f} detik."
+        self.statusBar().showMessage(msg, 5000)
+        logger.info("Translation completed. Output: %s, Elapsed: %.1fs", output_path, elapsed)
+        QMessageBox.information(
+            self,
+            "Penerjemahan Selesai",
+            f"File EPUB berhasil diterjemahkan dalam {elapsed:.1f} detik!\n\n"
+            f"Tersimpan di:\n{output_path}",
+        )
+
+    def _on_translation_error(self, error_msg: str) -> None:
+        """Handle translation error signal."""
+        self.statusBar().showMessage(f"Error: {error_msg}", 5000)
+        logger.error("Translation error: %s", error_msg)
+
+    def _on_worker_finished(self) -> None:
+        """Reset toolbar actions when worker thread finishes."""
+        logger.info("Worker thread finished. Resetting action toolbar buttons.")
+        self.action_start.setEnabled(True)
+        self.action_pause.setEnabled(False)
+        self.action_pause.setText("Jeda / Lanjut")
+        self.action_stop.setEnabled(False)
+        self.action_open.setEnabled(True)
+        self.action_dry_run.setEnabled(True)
 
     # =========================================================================
     # Window Lifecycle & Close Confirmation

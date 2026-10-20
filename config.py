@@ -166,6 +166,9 @@ class Config:
 
         return cfg
 
+    # Convenient alias for loading configuration
+    load = from_env
+
     def masked_keys_summary(self) -> str:
         """Return a safe summary of available API keys."""
         if not self.api_keys:
